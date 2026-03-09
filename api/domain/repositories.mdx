@@ -1,0 +1,448 @@
+---
+title: 'Repository Interfaces'
+description: 'Domain repository interfaces for data persistence in Connect World'
+---
+
+# Repository Interfaces
+
+Repository interfaces define contracts for data persistence operations. They belong to the domain layer but are implemented in the infrastructure layer, following the Dependency Inversion Principle.
+
+## Overview
+
+Repositories provide an abstraction over data access, allowing the domain layer to remain independent of specific persistence technologies (e.g., MongoDB, PostgreSQL).
+
+<Accordion title="Architecture Pattern">
+The repository pattern follows these principles:
+
+1. **Interface in Domain Layer**: Defines what operations are needed
+2. **Implementation in Infrastructure Layer**: Provides concrete implementation
+3. **Dependency Injection**: Use cases depend on interfaces, not implementations
+
+```typescript
+// Domain Layer
+export interface ICustomerRepository {
+  create(customer: Customer): Promise<Customer>;
+}
+
+// Infrastructure Layer
+export class MongoCustomerRepository implements ICustomerRepository {
+  async create(customer: Customer): Promise<Customer> {
+    // MongoDB-specific implementation
+  }
+}
+
+// Application Layer
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository // Depends on interface
+  ) {}
+}
+```
+</Accordion>
+
+---
+
+## ICustomerRepository
+
+Interface for managing customer data persistence.
+
+### Interface Definition
+
+```typescript src/domain/repositories/ICustomerRepository.ts
+import { Customer } from "../entities/Customer";
+
+export interface ICustomerRepository {
+  create(customer: Customer): Promise<Customer>;
+  findByEmail(email: string): Promise<Customer | null>;
+  findById(id: string): Promise<Customer | null>;
+}
+```
+
+### Methods
+
+<Accordion title="create">
+```typescript
+create(customer: Customer): Promise<Customer>
+```
+
+Persists a new customer to the database.
+
+<ResponseField name="customer" type="Customer" required>
+  Customer entity to persist (without `id` field)
+</ResponseField>
+
+**Returns:** `Promise<Customer>` - The created customer with generated `id`
+
+**Example:**
+```typescript
+import { createCustomer } from '@/domain/entities/Customer';
+
+const customerData = createCustomer({
+  name: 'John Doe',
+  email: 'john@example.com',
+  phone: '1234567890',
+});
+
+const customer = await customerRepo.create(customerData);
+console.log(customer.id); // Generated ID: "507f1f77bcf86cd799439011"
+```
+</Accordion>
+
+<Accordion title="findByEmail">
+```typescript
+findByEmail(email: string): Promise<Customer | null>
+```
+
+Retrieves a customer by their email address.
+
+<ResponseField name="email" type="string" required>
+  Email address to search for
+</ResponseField>
+
+**Returns:** `Promise<Customer | null>` - The customer if found, `null` otherwise
+
+**Example:**
+```typescript
+const customer = await customerRepo.findByEmail('john@example.com');
+
+if (customer) {
+  console.log(`Found customer: ${customer.name}`);
+} else {
+  console.log('Customer not found');
+}
+```
+</Accordion>
+
+<Accordion title="findById">
+```typescript
+findById(id: string): Promise<Customer | null>
+```
+
+Retrieves a customer by their unique identifier.
+
+<ResponseField name="id" type="string" required>
+  Customer ID to search for
+</ResponseField>
+
+**Returns:** `Promise<Customer | null>` - The customer if found, `null` otherwise
+
+**Example:**
+```typescript
+const customer = await customerRepo.findById('507f1f77bcf86cd799439011');
+
+if (customer) {
+  console.log(`Found customer: ${customer.name}`);
+} else {
+  console.log('Customer not found');
+}
+```
+</Accordion>
+
+### Implementation Reference
+
+The MongoDB implementation can be found at:
+- `src/infrastructure/persistence/mongodb/MongoCustomerRepository.ts`
+
+<Expandable title="Usage in Use Cases">
+```typescript src/application/use-cases/CreateOrderUseCase.ts
+import { ICustomerRepository } from '@/domain/repositories/ICustomerRepository';
+import { createCustomer } from '@/domain/entities/Customer';
+import { Email } from '@/domain/value-objects/Email';
+import { Phone } from '@/domain/value-objects/Phone';
+
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository,
+    private readonly orderRepo: IOrderRepository
+  ) {}
+
+  async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+    // Validate input
+    const email = new Email(dto.email);
+    const phone = new Phone(dto.phone);
+
+    // Create customer entity
+    const customerData = createCustomer({
+      name: dto.name,
+      email: email.toString(),
+      phone: phone.toString(),
+    });
+
+    // Persist customer using repository
+    const customer = await this.customerRepo.create(customerData);
+
+    // Use customer.id in subsequent operations
+    const orderData = createOrder({
+      customerId: customer.id!,
+      // ... other fields
+    });
+
+    // ...
+  }
+}
+```
+</Expandable>
+
+---
+
+## IOrderRepository
+
+Interface for managing order data persistence.
+
+### Interface Definition
+
+```typescript src/domain/repositories/IOrderRepository.ts
+import { Order } from "../entities/Order";
+
+export interface IOrderRepository {
+  create(order: Order): Promise<Order>;
+  findByCustomerId(customerId: string): Promise<Order[]>;
+  findByReceiptId(receiptId: string): Promise<Order | null>;
+}
+```
+
+### Methods
+
+<Accordion title="create">
+```typescript
+create(order: Order): Promise<Order>
+```
+
+Persists a new order to the database.
+
+<ResponseField name="order" type="Order" required>
+  Order entity to persist (without `id` field)
+</ResponseField>
+
+**Returns:** `Promise<Order>` - The created order with generated `id`
+
+**Example:**
+```typescript
+import { createOrder } from '@/domain/entities/Order';
+
+const orderData = createOrder({
+  customerId: 'cust_123',
+  planId: 'plan-2',
+  devices: 2,
+  months: 6,
+  amount: 70,
+  paymentMethod: 'stripe',
+  paymentReceiptId: 'pi_abc123',
+  status: 'completed',
+});
+
+const order = await orderRepo.create(orderData);
+console.log(order.id); // Generated ID: "507f1f77bcf86cd799439011"
+```
+</Accordion>
+
+<Accordion title="findByCustomerId">
+```typescript
+findByCustomerId(customerId: string): Promise<Order[]>
+```
+
+Retrieves all orders for a specific customer.
+
+<ResponseField name="customerId" type="string" required>
+  Customer ID to search for
+</ResponseField>
+
+**Returns:** `Promise<Order[]>` - Array of orders (empty array if none found)
+
+**Example:**
+```typescript
+const orders = await orderRepo.findByCustomerId('cust_123');
+
+console.log(`Found ${orders.length} orders`);
+orders.forEach(order => {
+  console.log(`Order ${order.id}: $${order.amount}`);
+});
+```
+</Accordion>
+
+<Accordion title="findByReceiptId">
+```typescript
+findByReceiptId(receiptId: string): Promise<Order | null>
+```
+
+Retrieves an order by payment receipt ID. Useful for payment webhook processing.
+
+<ResponseField name="receiptId" type="string" required>
+  Payment gateway receipt/transaction ID
+</ResponseField>
+
+**Returns:** `Promise<Order | null>` - The order if found, `null` otherwise
+
+**Example:**
+```typescript
+// In a payment webhook handler
+const receiptId = 'pi_abc123'; // From Stripe/PayPal
+const order = await orderRepo.findByReceiptId(receiptId);
+
+if (order) {
+  console.log(`Order ${order.id} found for receipt ${receiptId}`);
+  // Update order status, send confirmation email, etc.
+} else {
+  console.log('Order not found for this receipt');
+}
+```
+</Accordion>
+
+### Implementation Reference
+
+The MongoDB implementation can be found at:
+- `src/infrastructure/persistence/mongodb/MongoOrderRepository.ts`
+
+<Expandable title="Usage in Use Cases">
+```typescript src/application/use-cases/CreateOrderUseCase.ts
+import { IOrderRepository } from '@/domain/repositories/IOrderRepository';
+import { createOrder } from '@/domain/entities/Order';
+
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository,
+    private readonly orderRepo: IOrderRepository
+  ) {}
+
+  async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+    // Create customer first
+    const customer = await this.customerRepo.create(customerData);
+
+    // Create order entity
+    const orderData = createOrder({
+      customerId: customer.id!,
+      planId: dto.planId,
+      devices: dto.devices,
+      months: dto.months,
+      amount: dto.amount,
+      paymentMethod: dto.paymentMethod,
+      paymentReceiptId: dto.paymentReceiptId,
+      status: 'completed',
+    });
+
+    // Persist order using repository
+    const order = await this.orderRepo.create(orderData);
+
+    // Return response DTO
+    return {
+      orderId: order.id!,
+      customerId: customer.id!,
+      planId: order.planId,
+      devices: order.devices,
+      months: order.months,
+      amount: order.amount,
+      paymentMethod: order.paymentMethod,
+      paymentReceiptId: order.paymentReceiptId,
+      status: order.status,
+      activationDate: order.activationDate.toISOString(),
+      expirationDate: order.expirationDate.toISOString(),
+    };
+  }
+}
+```
+</Expandable>
+
+---
+
+## Repository Design Patterns
+
+<Accordion title="Dependency Injection">
+Repositories are injected into use cases via constructor injection:
+
+```typescript
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository,
+    private readonly orderRepo: IOrderRepository
+  ) {}
+}
+
+// In dependency injection container
+const customerRepo = new MongoCustomerRepository(db);
+const orderRepo = new MongoOrderRepository(db);
+const useCase = new CreateOrderUseCase(customerRepo, orderRepo);
+```
+
+This allows:
+- Testing with mock repositories
+- Switching implementations without changing use cases
+- Following SOLID principles
+</Accordion>
+
+<Accordion title="Error Handling">
+Repository methods should throw errors for exceptional cases:
+
+```typescript
+class MongoCustomerRepository implements ICustomerRepository {
+  async create(customer: Customer): Promise<Customer> {
+    try {
+      const result = await this.collection.insertOne(customer);
+      return { ...customer, id: result.insertedId.toString() };
+    } catch (error) {
+      throw new Error(`Failed to create customer: ${error.message}`);
+    }
+  }
+}
+```
+
+Use cases should handle repository errors:
+
+```typescript
+try {
+  const customer = await this.customerRepo.create(customerData);
+} catch (error) {
+  console.error('Failed to persist customer', error);
+  throw error; // Or handle appropriately
+}
+```
+</Accordion>
+
+<Accordion title="Testing">
+Mock repositories for unit testing use cases:
+
+```typescript
+import { ICustomerRepository } from '@/domain/repositories/ICustomerRepository';
+
+class MockCustomerRepository implements ICustomerRepository {
+  private customers: Customer[] = [];
+
+  async create(customer: Customer): Promise<Customer> {
+    const newCustomer = { ...customer, id: 'mock-id' };
+    this.customers.push(newCustomer);
+    return newCustomer;
+  }
+
+  async findByEmail(email: string): Promise<Customer | null> {
+    return this.customers.find(c => c.email === email) || null;
+  }
+
+  async findById(id: string): Promise<Customer | null> {
+    return this.customers.find(c => c.id === id) || null;
+  }
+}
+
+// In tests
+const mockCustomerRepo = new MockCustomerRepository();
+const mockOrderRepo = new MockOrderRepository();
+const useCase = new CreateOrderUseCase(mockCustomerRepo, mockOrderRepo);
+```
+</Accordion>
+
+<Accordion title="Return Types">
+Repository methods follow these conventions:
+
+- **Create operations**: Return the created entity with generated `id`
+- **Find single**: Return `Entity | null` (null if not found)
+- **Find multiple**: Return `Entity[]` (empty array if none found)
+- **Update/Delete**: Return `void` or `boolean` indicating success
+
+```typescript
+interface IRepository<T> {
+  create(entity: T): Promise<T>;           // Returns created entity
+  findById(id: string): Promise<T | null>; // null if not found
+  findAll(): Promise<T[]>;                 // Empty array if none
+  update(entity: T): Promise<void>;        // void on success
+  delete(id: string): Promise<boolean>;    // true if deleted
+}
+```
+</Accordion>

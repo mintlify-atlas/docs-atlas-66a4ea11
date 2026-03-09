@@ -1,0 +1,205 @@
+---
+title: 'API Overview'
+description: 'Complete guide to Connect World API - authentication, rate limits, and error handling'
+icon: 'book-open'
+---
+
+## Introduction
+
+Welcome to the Connect World API documentation. This API enables you to manage streaming subscriptions, process payments, and integrate with our content catalog.
+
+## Base URL
+
+All API requests should be made to:
+
+```
+https://your-domain.com/api
+```
+
+## Authentication
+
+<Warning>
+  Most endpoints are publicly accessible but implement strict rate limiting per IP address to prevent abuse. Sensitive operations validate all input data server-side.
+</Warning>
+
+The Connect World API uses server-side validation and rate limiting instead of API keys for public endpoints. All payment operations are secured through:
+
+- **Rate limiting** per IP address
+- **Server-side price validation** to prevent tampering
+- **Honeypot fields** to detect bot traffic
+- **Input sanitization** on all parameters
+
+## Rate Limiting
+
+Rate limits are applied per IP address to prevent abuse:
+
+| Endpoint | Rate Limit | Window |
+|----------|------------|--------|
+| `/api/orders` | 5 requests | 10 minutes |
+| `/api/stripe` | 10 requests | 15 minutes |
+| `/api/paypal/create-order` | 10 requests | 15 minutes |
+| `/api/paypal/capture-order` | No limit | - |
+| `/api/tmdb` | No limit | - |
+
+### Rate Limit Response
+
+When you exceed the rate limit, you'll receive a `429` status code:
+
+```json
+{
+  "error": "Demasiadas solicitudes. Intenta de nuevo en unos minutos."
+}
+```
+
+## Error Response Format
+
+All API errors follow a consistent format:
+
+```json
+{
+  "error": "Error message describing what went wrong"
+}
+```
+
+### Common HTTP Status Codes
+
+<ResponseField name="200" type="OK">
+  Request succeeded
+</ResponseField>
+
+<ResponseField name="201" type="Created">
+  Resource successfully created
+</ResponseField>
+
+<ResponseField name="400" type="Bad Request">
+  Invalid or missing parameters in the request
+</ResponseField>
+
+<ResponseField name="429" type="Too Many Requests">
+  Rate limit exceeded - wait before retrying
+</ResponseField>
+
+<ResponseField name="500" type="Internal Server Error">
+  Server error - contact support if persists
+</ResponseField>
+
+## Error Codes
+
+Common error messages you may encounter:
+
+| Error Message | Cause | Solution |
+|---------------|-------|----------|
+| `Datos del formulario inválidos o incompletos` | Missing or invalid request parameters | Check all required fields are provided |
+| `Plan inválido` | Invalid plan ID | Use a valid plan ID: `plan-1`, `plan-2`, or `plan-3` |
+| `Duración inválida` | Invalid subscription duration | Use valid months: 1, 2, 3, 6, or 12 |
+| `Monto inválido` | Amount doesn't match plan pricing | Use correct price for selected plan and duration |
+| `Número de dispositivos inválido` | Devices don't match plan | Ensure devices match the plan (1, 2, or 3) |
+| `Demasiadas solicitudes` | Rate limit exceeded | Wait before making more requests |
+
+## Available Plans
+
+Connect World offers three subscription plans:
+
+### Plan IDs
+
+<CodeGroup>
+```json Basic Plan
+{
+  "id": "plan-1",
+  "devices": 1,
+  "name": "Basic",
+  "prices": [
+    { "months": 1, "price": 10 },
+    { "months": 2, "price": 20 },
+    { "months": 3, "price": 30 },
+    { "months": 6, "price": 60 },
+    { "months": 12, "price": 120 }
+  ]
+}
+```
+
+```json Standard Plan
+{
+  "id": "plan-2",
+  "devices": 2,
+  "name": "Standard",
+  "prices": [
+    { "months": 1, "price": 15 },
+    { "months": 2, "price": 25 },
+    { "months": 3, "price": 35 },
+    { "months": 6, "price": 70 },
+    { "months": 12, "price": 140 }
+  ]
+}
+```
+
+```json Premium Plan
+{
+  "id": "plan-3",
+  "devices": 3,
+  "name": "Premium",
+  "prices": [
+    { "months": 1, "price": 15 },
+    { "months": 2, "price": 30 },
+    { "months": 3, "price": 45 },
+    { "months": 6, "price": 80 },
+    { "months": 12, "price": 149 }
+  ]
+}
+```
+</CodeGroup>
+
+## Quick Start
+
+Here's a typical workflow for creating a subscription:
+
+1. **Choose a plan** and duration from the available options
+2. **Create a payment intent** using `/api/stripe` or `/api/paypal/create-order`
+3. **Process the payment** on the client side
+4. **Create the order** using `/api/orders` with the payment receipt ID
+
+## API Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Orders" icon="cart-shopping" href="/api/orders">
+    Create and manage subscription orders
+  </Card>
+  
+  <Card title="Stripe" icon="stripe" href="/api/stripe">
+    Create Stripe payment intents
+  </Card>
+  
+  <Card title="PayPal" icon="paypal" href="/api/paypal">
+    Create and capture PayPal orders
+  </Card>
+  
+  <Card title="TMDB" icon="film" href="/api/tmdb">
+    Fetch trending movies and shows
+  </Card>
+</CardGroup>
+
+## Request Headers
+
+All POST requests should include:
+
+```http
+Content-Type: application/json
+```
+
+## Best Practices
+
+<Note>
+  - Always validate prices client-side before submitting (server validates again)
+  - Implement exponential backoff when rate limited
+  - Handle all error responses gracefully
+  - Never expose payment secrets in client code
+</Note>
+
+## Support
+
+If you encounter issues with the API:
+
+1. Check this documentation for correct usage
+2. Verify your request parameters match the schemas
+3. Check rate limits and error messages
+4. Contact support with the error details and timestamp

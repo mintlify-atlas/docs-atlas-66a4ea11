@@ -1,0 +1,273 @@
+---
+title: 'Use Cases'
+description: 'Application layer use cases for Connect World business logic'
+---
+
+## Overview
+
+Use cases encapsulate the business logic of the Connect World application. They orchestrate domain entities, value objects, and repositories to fulfill specific business requirements.
+
+## CreateOrderUseCase
+
+The `CreateOrderUseCase` handles the complete workflow for creating a new customer order, including customer creation and order processing.
+
+### Class Definition
+
+```typescript src/application/use-cases/CreateOrderUseCase.ts
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository,
+    private readonly orderRepo: IOrderRepository
+  ) {}
+
+  async execute(dto: CreateOrderDto): Promise<OrderResponseDto>
+}
+```
+
+### Constructor Dependencies
+
+<ParamField path="customerRepo" type="ICustomerRepository" required>
+  Repository for managing customer persistence operations. Handles creating and retrieving customer records from the database.
+</ParamField>
+
+<ParamField path="orderRepo" type="IOrderRepository" required>
+  Repository for managing order persistence operations. Handles creating and retrieving order records from the database.
+</ParamField>
+
+### execute() Method
+
+The `execute` method is the entry point for the use case. It accepts a DTO and returns a promise that resolves to the order response.
+
+#### Signature
+
+```typescript
+async execute(dto: CreateOrderDto): Promise<OrderResponseDto>
+```
+
+#### Parameters
+
+<ParamField path="dto" type="CreateOrderDto" required>
+  The input data transfer object containing all required information to create an order.
+  See [DTOs documentation](/api/application/dtos) for complete field definitions.
+</ParamField>
+
+#### Returns
+
+<ResponseField name="OrderResponseDto" type="OrderResponseDto">
+  A complete order response object containing the created order details, customer ID, and calculated activation/expiration dates.
+  See [DTOs documentation](/api/application/dtos) for complete field definitions.
+</ResponseField>
+
+### Execution Workflow
+
+The use case follows a precise step-by-step workflow:
+
+<Steps>
+  <Step title="Validate Value Objects">
+    Create validated `Email` and `Phone` value objects from the input DTO. These throw errors if the values are invalid.
+
+    ```typescript
+    const email = new Email(dto.email);
+    const phone = new Phone(dto.phone);
+    ```
+  </Step>
+
+  <Step title="Create Customer Entity">
+    Use the domain factory function to create a customer entity with validated data.
+
+    ```typescript
+    const customerData = createCustomer({
+      name: dto.name,
+      email: email.toString(),
+      phone: phone.toString(),
+    });
+    ```
+  </Step>
+
+  <Step title="Persist Customer">
+    Save the customer to the database using the customer repository.
+
+    ```typescript
+    const customer = await this.customerRepo.create(customerData);
+    ```
+  </Step>
+
+  <Step title="Create Order Entity">
+    Use the domain factory function to create an order entity. This automatically calculates activation and expiration dates based on the subscription months.
+
+    ```typescript
+    const orderData = createOrder({
+      customerId: customer.id!,
+      planId: dto.planId,
+      devices: dto.devices,
+      months: dto.months,
+      amount: dto.amount,
+      paymentMethod: dto.paymentMethod,
+      paymentReceiptId: dto.paymentReceiptId,
+      status: "completed",
+    });
+    ```
+  </Step>
+
+  <Step title="Persist Order">
+    Save the order to the database using the order repository.
+
+    ```typescript
+    const order = await this.orderRepo.create(orderData);
+    ```
+  </Step>
+
+  <Step title="Return Response DTO">
+    Transform the domain entities into a response DTO with serialized dates.
+
+    ```typescript
+    return {
+      orderId: order.id!,
+      customerId: customer.id!,
+      planId: order.planId,
+      devices: order.devices,
+      months: order.months,
+      amount: order.amount,
+      paymentMethod: order.paymentMethod,
+      paymentReceiptId: order.paymentReceiptId,
+      status: order.status,
+      activationDate: order.activationDate.toISOString(),
+      expirationDate: order.expirationDate.toISOString(),
+    };
+    ```
+  </Step>
+</Steps>
+
+### Error Handling
+
+<Note>
+  The use case will throw errors if:
+  - Email or phone validation fails (invalid format)
+  - Customer creation fails (database error)
+  - Order creation fails (database error)
+  
+  These errors should be caught and handled by the calling code (typically API routes).
+</Note>
+
+### Complete Implementation
+
+```typescript src/application/use-cases/CreateOrderUseCase.ts
+import { createCustomer } from "@/domain/entities/Customer";
+import { createOrder } from "@/domain/entities/Order";
+import { ICustomerRepository } from "@/domain/repositories/ICustomerRepository";
+import { IOrderRepository } from "@/domain/repositories/IOrderRepository";
+import { Email } from "@/domain/value-objects/Email";
+import { Phone } from "@/domain/value-objects/Phone";
+import { CreateOrderDto, OrderResponseDto } from "@/application/dtos/OrderDto";
+
+export class CreateOrderUseCase {
+  constructor(
+    private readonly customerRepo: ICustomerRepository,
+    private readonly orderRepo: IOrderRepository
+  ) {}
+
+  async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+    const email = new Email(dto.email);
+    const phone = new Phone(dto.phone);
+
+    const customerData = createCustomer({
+      name: dto.name,
+      email: email.toString(),
+      phone: phone.toString(),
+    });
+
+    const customer = await this.customerRepo.create(customerData);
+
+    const orderData = createOrder({
+      customerId: customer.id!,
+      planId: dto.planId,
+      devices: dto.devices,
+      months: dto.months,
+      amount: dto.amount,
+      paymentMethod: dto.paymentMethod,
+      paymentReceiptId: dto.paymentReceiptId,
+      status: "completed",
+    });
+
+    const order = await this.orderRepo.create(orderData);
+
+    return {
+      orderId: order.id!,
+      customerId: customer.id!,
+      planId: order.planId,
+      devices: order.devices,
+      months: order.months,
+      amount: order.amount,
+      paymentMethod: order.paymentMethod,
+      paymentReceiptId: order.paymentReceiptId,
+      status: order.status,
+      activationDate: order.activationDate.toISOString(),
+      expirationDate: order.expirationDate.toISOString(),
+    };
+  }
+}
+```
+
+## Usage from API Routes
+
+The use case is typically instantiated and executed within API route handlers:
+
+```typescript src/app/api/orders/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { CreateOrderUseCase } from "@/application/use-cases/CreateOrderUseCase";
+import { MongoCustomerRepository } from "@/infrastructure/repositories/MongoCustomerRepository";
+import { MongoOrderRepository } from "@/infrastructure/repositories/MongoOrderRepository";
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+
+    // Sanitize and validate input (omitted for brevity)
+    // ...
+
+    // Instantiate repositories and use case
+    const customerRepo = new MongoCustomerRepository();
+    const orderRepo = new MongoOrderRepository();
+    const useCase = new CreateOrderUseCase(customerRepo, orderRepo);
+
+    // Execute the use case
+    const result = await useCase.execute({
+      name: body.name,
+      email: body.email,
+      phone: body.phone,
+      planId: body.planId,
+      devices: body.devices,
+      months: body.months,
+      amount: body.amount,
+      paymentMethod: body.paymentMethod,
+      paymentReceiptId: body.paymentReceiptId,
+    });
+
+    return NextResponse.json(result, { status: 201 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    console.error("[POST /api/orders]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+```
+
+### Best Practices
+
+<Note>
+  **Separation of Concerns**
+  
+  - API routes handle HTTP concerns (request parsing, validation, response formatting)
+  - Use cases handle business logic (orchestrating domain operations)
+  - Repositories handle persistence (database interactions)
+  - Domain entities and value objects handle business rules and validation
+</Note>
+
+<Note>
+  **Dependency Injection**
+  
+  Use cases receive their dependencies through constructor injection, making them:
+  - Easy to test (mock repositories in unit tests)
+  - Flexible (swap implementations without changing use case code)
+  - Following SOLID principles (dependency inversion)
+</Note>

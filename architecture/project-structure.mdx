@@ -1,0 +1,645 @@
+---
+title: 'Project Structure'
+description: 'Complete directory tree and organization of the Connect World codebase'
+icon: 'folder-tree'
+---
+
+<Note>
+  Connect World follows a **layered architecture** with clear separation between domain logic, application workflows, infrastructure, and presentation.
+</Note>
+
+## Root Directory Structure
+
+```plaintext
+connect-world-landing/
+├── .git/                    # Git repository
+├── .claude/                 # AI assistant configuration
+├── public/                  # Static assets
+│   ├── images/             # Image files
+│   └── favicon.ico         # Site favicon
+├── src/                     # Source code (see below)
+├── .gitignore              # Git ignore patterns
+├── README.md               # Project documentation
+├── eslint.config.mjs       # ESLint configuration
+├── next.config.ts          # Next.js configuration
+├── package.json            # Dependencies and scripts
+├── package-lock.json       # Locked dependency versions
+├── postcss.config.mjs      # PostCSS configuration
+└── tsconfig.json           # TypeScript configuration
+```
+
+## Source Code Structure
+
+The `src/` directory is organized into layers following Domain-Driven Design principles:
+
+<Accordion title="Complete Directory Tree">
+```plaintext
+src/
+├── app/                           # Next.js App Router
+│   ├── api/                       # API route handlers
+│   │   ├── orders/               # Order management
+│   │   │   └── route.ts          # POST /api/orders
+│   │   ├── paypal/               # PayPal integration
+│   │   │   ├── create-order/
+│   │   │   │   └── route.ts      # Create PayPal order
+│   │   │   └── capture-order/
+│   │   │       └── route.ts      # Capture PayPal payment
+│   │   ├── stripe/               # Stripe integration
+│   │   │   └── route.ts          # Stripe payment intent
+│   │   └── tmdb/                 # TMDB proxy
+│   │       └── route.ts          # Fetch content data
+│   ├── layout.tsx                # Root layout component
+│   └── page.tsx                  # Homepage entry point
+│
+├── application/                   # Application layer (Use Cases)
+│   ├── dtos/
+│   │   └── OrderDto.ts           # Data transfer objects
+│   └── use-cases/
+│       └── CreateOrderUseCase.ts # Order creation workflow
+│
+├── domain/                        # Domain layer (Business Logic)
+│   ├── entities/                 # Core business entities
+│   │   ├── Customer.ts           # Customer entity & factory
+│   │   ├── Order.ts              # Order entity & factory
+│   │   └── Plan.ts               # Plan entity & pricing
+│   ├── repositories/             # Repository interfaces
+│   │   ├── ICustomerRepository.ts
+│   │   └── IOrderRepository.ts
+│   └── value-objects/            # Value objects with validation
+│       ├── Email.ts              # Email validation & normalization
+│       └── Phone.ts              # Phone validation & formatting
+│
+├── infrastructure/                # Infrastructure layer (Technical)
+│   ├── database/                 # Database layer
+│   │   ├── connection.ts         # MongoDB connection (cached)
+│   │   └── models/               # Mongoose schemas
+│   │       ├── CustomerModel.ts  # Customer schema (snake_case)
+│   │       └── OrderModel.ts     # Order schema (snake_case)
+│   ├── external/                 # External API integrations
+│   │   └── tmdbService.ts        # TMDB API client
+│   └── repositories/             # Repository implementations
+│       ├── MongoCustomerRepository.ts  # Customer data access
+│       └── MongoOrderRepository.ts     # Order data access
+│
+├── lib/                           # Shared utilities
+│   ├── caseUtils.ts              # Case conversion utilities
+│   ├── rateLimiter.ts            # Rate limiting (in-memory)
+│   ├── sanitize.ts               # Input sanitization
+│   └── utils.ts                  # General utilities (cn, etc.)
+│
+└── presentation/                  # Presentation layer (UI)
+    └── components/
+        ├── LandingClient.tsx     # Main client component
+        ├── sections/             # Page sections
+        │   ├── AboutSection.tsx  # About section
+        │   ├── CatalogSection.tsx  # Content catalog
+        │   ├── CheckoutModal.tsx   # Payment checkout
+        │   ├── ContactSection.tsx  # Contact information
+        │   ├── Footer.tsx          # Site footer
+        │   ├── HeroSection.tsx     # Landing hero
+        │   ├── Navbar.tsx          # Navigation bar
+        │   ├── PlansSection.tsx    # Pricing plans
+        │   └── StatsSection.tsx    # Statistics display
+        └── ui/                     # Reusable UI components
+            ├── BackgroundGradient.tsx
+            ├── GlowCard.tsx
+            ├── MovingCards.tsx
+            ├── NumberCounter.tsx
+            ├── SparklesCore.tsx
+            ├── Spotlight.tsx
+            └── TextReveal.tsx
+```
+</Accordion>
+
+## Layer Breakdown
+
+### Domain Layer (`src/domain/`)
+
+<Card title="Domain Layer" icon="gem">
+  **Pure business logic with zero dependencies on frameworks or infrastructure.**
+
+  <Accordion title="Entities" icon="cube">
+    **Location**: `src/domain/entities/`
+
+    | File | Purpose | Key Features |
+    |------|---------|-------------|
+    | `Customer.ts` | Customer entity and factory | Email, phone, name validation |
+    | `Order.ts` | Order entity and factory | Payment tracking, subscription dates |
+    | `Plan.ts` | Plan entity and pricing matrix | Dynamic pricing, feature lists |
+
+    **Example**: `src/domain/entities/Order.ts:19`
+    ```typescript
+    export function createOrder(data: Omit<Order, "id" | "createdAt" | "activationDate" | "expirationDate">): Order {
+      const activationDate = new Date();
+      const expirationDate = new Date();
+      expirationDate.setMonth(expirationDate.getMonth() + data.months);
+      return { ...data, activationDate, expirationDate, createdAt: new Date() };
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Value Objects" icon="shield-check">
+    **Location**: `src/domain/value-objects/`
+
+    | File | Purpose | Validation |
+    |------|---------|------------|
+    | `Email.ts` | Email validation | Regex, lowercase, trim |
+    | `Phone.ts` | Phone validation | Digit extraction, length check |
+
+    **Example**: `src/domain/value-objects/Email.ts:4`
+    ```typescript
+    constructor(email: string) {
+      if (!this.isValid(email)) {
+        throw new Error(`Invalid email: ${email}`);
+      }
+      this.value = email.toLowerCase().trim();
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Repository Interfaces" icon="box">
+    **Location**: `src/domain/repositories/`
+
+    | File | Interface | Methods |
+    |------|-----------|--------|
+    | `ICustomerRepository.ts` | `ICustomerRepository` | `create`, `findByEmail`, `findById` |
+    | `IOrderRepository.ts` | `IOrderRepository` | `create`, `findByCustomerId`, `findByReceiptId` |
+
+    **Purpose**: Define data access contracts without implementation details.
+  </Accordion>
+</Card>
+
+### Application Layer (`src/application/`)
+
+<Card title="Application Layer" icon="gears">
+  **Orchestrates business workflows by coordinating domain entities and repositories.**
+
+  <Accordion title="Use Cases" icon="diagram-project">
+    **Location**: `src/application/use-cases/`
+
+    | File | Use Case | Workflow |
+    |------|----------|----------|
+    | `CreateOrderUseCase.ts` | Order creation | Validate → Create customer → Create order → Persist → Return DTO |
+
+    **Key Code**: `src/application/use-cases/CreateOrderUseCase.ts:15`
+    ```typescript
+    async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+      const email = new Email(dto.email);  // Domain validation
+      const phone = new Phone(dto.phone);
+      
+      const customerData = createCustomer({ name: dto.name, email: email.toString(), phone: phone.toString() });
+      const customer = await this.customerRepo.create(customerData);  // Infrastructure
+      
+      const orderData = createOrder({ ...dto, customerId: customer.id!, status: "completed" });
+      const order = await this.orderRepo.create(orderData);  // Infrastructure
+      
+      return { orderId: order.id!, ... };  // DTO mapping
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="DTOs" icon="file-code">
+    **Location**: `src/application/dtos/`
+
+    | File | DTOs | Purpose |
+    |------|------|--------|
+    | `OrderDto.ts` | `CreateOrderDto`, `OrderResponseDto` | API contract, serialization |
+
+    **Purpose**: Decouple external API from internal domain entities.
+  </Accordion>
+</Card>
+
+### Infrastructure Layer (`src/infrastructure/`)
+
+<Card title="Infrastructure Layer" icon="server">
+  **Implements technical concerns: database, external APIs, and repository implementations.**
+
+  <Accordion title="Database" icon="database">
+    **Location**: `src/infrastructure/database/`
+
+    | File | Purpose | Key Features |
+    |------|---------|-------------|
+    | `connection.ts` | MongoDB connection | Cached connection for serverless |
+    | `models/CustomerModel.ts` | Customer Mongoose schema | snake_case fields, timestamps |
+    | `models/OrderModel.ts` | Order Mongoose schema | Unique payment receipt ID |
+
+    **Connection Caching**: `src/infrastructure/database/connection.ts:22`
+    ```typescript
+    export async function connectDB(): Promise<typeof mongoose> {
+      if (cached.conn) return cached.conn;  // Reuse existing connection
+      if (!cached.promise) {
+        cached.promise = mongoose.connect(MONGODB_URI, { bufferCommands: false });
+      }
+      cached.conn = await cached.promise;
+      return cached.conn;
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="Repositories" icon="box">
+    **Location**: `src/infrastructure/repositories/`
+
+    | File | Implementation | Maps |
+    |------|----------------|------|
+    | `MongoCustomerRepository.ts` | `ICustomerRepository` | Customer ↔ CustomerDbDoc |
+    | `MongoOrderRepository.ts` | `IOrderRepository` | Order ↔ OrderDbDoc |
+
+    **Data Mapping**: `src/infrastructure/repositories/MongoOrderRepository.ts:7`
+    ```typescript
+    // Domain entity (camelCase) → Database document (snake_case)
+    function orderToDb(order: Order): Record<string, unknown> {
+      return {
+        customer_id: order.customerId,
+        payment_method: order.paymentMethod,
+        activation_date: order.activationDate,
+        // ...
+      };
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="External Services" icon="cloud">
+    **Location**: `src/infrastructure/external/`
+
+    | File | Service | Features |
+    |------|---------|----------|
+    | `tmdbService.ts` | TMDB API | Trending content, now playing, top rated, poster URLs |
+
+    **Example**: `src/infrastructure/external/tmdbService.ts:29`
+    ```typescript
+    export async function getTrendingAll(timeWindow: "day" | "week" = "week"): Promise<TmdbMovie[]> {
+      const { data } = await tmdbClient.get(`/trending/all/${timeWindow}`);
+      return data.results.slice(0, 10);
+    }
+    ```
+  </Accordion>
+</Card>
+
+### Presentation Layer (`src/presentation/` + `src/app/`)
+
+<Card title="Presentation Layer" icon="browser">
+  **User interface components and API route handlers.**
+
+  <Accordion title="API Routes" icon="route">
+    **Location**: `src/app/api/`
+
+    | Endpoint | File | Purpose |
+    |----------|------|--------|
+    | `POST /api/orders` | `api/orders/route.ts` | Create order (with use case) |
+    | `POST /api/stripe` | `api/stripe/route.ts` | Stripe payment intent |
+    | `POST /api/paypal/create-order` | `api/paypal/create-order/route.ts` | PayPal order creation |
+    | `POST /api/paypal/capture-order` | `api/paypal/capture-order/route.ts` | PayPal payment capture |
+    | `GET /api/tmdb` | `api/tmdb/route.ts` | Proxy TMDB requests |
+
+    **Security**: All routes implement rate limiting, sanitization, and validation.
+  </Accordion>
+
+  <Accordion title="Section Components" icon="puzzle-piece">
+    **Location**: `src/presentation/components/sections/`
+
+    | Component | Purpose | Key Features |
+    |-----------|---------|-------------|
+    | `HeroSection.tsx` | Landing hero | Spotlight effect, animated text |
+    | `PlansSection.tsx` | Pricing display | Dynamic pricing, popular badge |
+    | `CatalogSection.tsx` | Content showcase | TMDB integration, moving cards |
+    | `CheckoutModal.tsx` | Payment form | Stripe & PayPal, validation |
+    | `ContactSection.tsx` | Contact info | Social links, support details |
+    | `AboutSection.tsx` | About section | Company information |
+    | `StatsSection.tsx` | Statistics | Animated counters |
+    | `Navbar.tsx` | Navigation | Scroll-triggered transparency |
+    | `Footer.tsx` | Site footer | Links, copyright |
+  </Accordion>
+
+  <Accordion title="UI Components" icon="palette">
+    **Location**: `src/presentation/components/ui/`
+
+    | Component | Effect | Usage |
+    |-----------|--------|-------|
+    | `BackgroundGradient.tsx` | Gradient background | Card highlights |
+    | `GlowCard.tsx` | Glow effect | Featured items |
+    | `MovingCards.tsx` | Animated carousel | Content display |
+    | `Spotlight.tsx` | Spotlight effect | Hero section |
+    | `SparklesCore.tsx` | Particle effects | Visual polish |
+    | `TextReveal.tsx` | Text animations | Reveal effects |
+    | `NumberCounter.tsx` | Animated counters | Statistics |
+  </Accordion>
+
+  <Accordion title="Root Pages" icon="file">
+    **Location**: `src/app/`
+
+    | File | Purpose | Renders |
+    |------|---------|--------|
+    | `page.tsx` | Homepage | LandingClient component |
+    | `layout.tsx` | Root layout | Metadata, fonts, global styles |
+  </Accordion>
+</Card>
+
+### Shared Utilities (`src/lib/`)
+
+<Card title="Shared Utilities" icon="toolbox">
+  **Reusable helper functions used across layers.**
+
+  | File | Purpose | Key Functions |
+  |------|---------|---------------|
+  | `sanitize.ts` | Input sanitization | `sanitizeString`, `sanitizeEmail`, `sanitizePhone`, `sanitizeNumber`, `sanitizeEnum` |
+  | `rateLimiter.ts` | Rate limiting | `checkRateLimit`, `getClientIp` |
+  | `caseUtils.ts` | Case conversion | `camelToSnake`, `snakeToCamel` (for DB mapping) |
+  | `utils.ts` | General utilities | `cn` (className merger with tailwind-merge) |
+
+  **Example**: `src/lib/sanitize.ts`
+  ```typescript
+  export function sanitizeString(value: unknown, maxLength = 255): string | null {
+    if (typeof value !== "string") return null;
+    return value.trim().slice(0, maxLength).replace(/[<>]/g, "");
+  }
+
+  export function sanitizeEmail(value: unknown): string | null {
+    if (typeof value !== "string") return null;
+    const email = value.trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null;
+  }
+  ```
+</Card>
+
+## Configuration Files
+
+<CardGroup cols={2}>
+  <Card title="next.config.ts" icon="file-code">
+    Next.js configuration:
+    - Image domains (TMDB)
+    - Environment variables
+    - Build settings
+  </Card>
+
+  <Card title="tsconfig.json" icon="file-code">
+    TypeScript configuration:
+    - Path aliases (`@/*`)
+    - Strict mode enabled
+    - JSX support for React
+  </Card>
+
+  <Card title="package.json" icon="package">
+    Dependencies and scripts:
+    - `dev`: Start dev server
+    - `build`: Production build
+    - `start`: Serve production
+    - `lint`: Run ESLint
+  </Card>
+
+  <Card title="eslint.config.mjs" icon="file-code">
+    ESLint configuration:
+    - Next.js rules
+    - TypeScript rules
+    - Code quality checks
+  </Card>
+</CardGroup>
+
+## File Naming Conventions
+
+<Note>
+  Connect World follows consistent naming conventions across the codebase.
+</Note>
+
+| Context | Convention | Example |
+|---------|------------|--------|
+| React Components | PascalCase + `.tsx` | `CheckoutModal.tsx` |
+| TypeScript Files | PascalCase + `.ts` | `CreateOrderUseCase.ts` |
+| Utility Files | camelCase + `.ts` | `sanitize.ts`, `rateLimiter.ts` |
+| API Routes | lowercase + `/route.ts` | `api/orders/route.ts` |
+| Domain Entities | PascalCase | `Customer.ts`, `Order.ts` |
+| Value Objects | PascalCase | `Email.ts`, `Phone.ts` |
+| Repository Interfaces | `I` prefix + PascalCase | `IOrderRepository.ts` |
+| Repository Implementations | `Mongo` prefix + PascalCase | `MongoOrderRepository.ts` |
+| Database Models | PascalCase + `Model` | `OrderModel.ts` |
+| DTOs | PascalCase + `Dto` | `OrderDto.ts` |
+
+### Code Conventions
+
+<CardGroup cols={2}>
+  <Card title="Domain Layer" icon="gem">
+    - **Entities**: camelCase properties
+    - **Factory functions**: `create` prefix
+    - **No framework imports**
+  </Card>
+
+  <Card title="Database Layer" icon="database">
+    - **Schema fields**: snake_case
+    - **MongoDB collections**: lowercase plural
+    - **Mapping functions**: `toDb`, `fromDb`
+  </Card>
+
+  <Card title="API Routes" icon="route">
+    - **HTTP methods**: Uppercase (GET, POST)
+    - **Error handling**: Try-catch with status codes
+    - **Response**: JSON with NextResponse
+  </Card>
+
+  <Card title="Components" icon="react">
+    - **Props**: TypeScript interfaces
+    - **Exports**: Named or default
+    - **Styling**: Tailwind CSS classes
+  </Card>
+</CardGroup>
+
+## Import Path Aliases
+
+Connect World uses TypeScript path aliases for clean imports:
+
+```typescript
+// Instead of:
+import { Order } from "../../../../domain/entities/Order";
+
+// Use:
+import { Order } from "@/domain/entities/Order";
+```
+
+**Configuration**: `tsconfig.json`
+```json
+{
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}
+```
+
+## Key Files Reference
+
+<Accordion title="Critical Business Logic Files">
+  | File | Purpose | Lines |
+  |------|---------|-------|
+  | `src/domain/entities/Order.ts` | Order entity and factory | 31 |
+  | `src/domain/entities/Plan.ts` | Pricing logic | 79 |
+  | `src/application/use-cases/CreateOrderUseCase.ts` | Order workflow | 55 |
+  | `src/app/api/orders/route.ts` | Order API endpoint | 98 |
+</Accordion>
+
+<Accordion title="Infrastructure Files">
+  | File | Purpose | Lines |
+  |------|---------|-------|
+  | `src/infrastructure/repositories/MongoOrderRepository.ts` | Order data access | 64 |
+  | `src/infrastructure/database/connection.ts` | MongoDB connection | 34 |
+  | `src/infrastructure/external/tmdbService.ts` | TMDB API client | 48 |
+</Accordion>
+
+<Accordion title="Security & Utilities">
+  | File | Purpose | Features |
+  |------|---------|----------|
+  | `src/lib/sanitize.ts` | Input sanitization | XSS prevention, validation |
+  | `src/lib/rateLimiter.ts` | Rate limiting | IP-based, configurable windows |
+  | `src/domain/value-objects/Email.ts` | Email validation | Regex, normalization |
+</Accordion>
+
+## Directory Purpose Summary
+
+<CardGroup cols={2}>
+  <Card title="src/domain/" icon="gem">
+    **Pure business logic**
+    
+    No dependencies on frameworks, databases, or external services. Contains entities, value objects, and repository interfaces.
+  </Card>
+
+  <Card title="src/application/" icon="gears">
+    **Workflow orchestration**
+    
+    Coordinates domain entities and repositories to implement business use cases. Defines DTOs for data transfer.
+  </Card>
+
+  <Card title="src/infrastructure/" icon="server">
+    **Technical implementation**
+    
+    Implements repository interfaces, database models, external API clients, and connection management.
+  </Card>
+
+  <Card title="src/presentation/" icon="browser">
+    **User interface**
+    
+    React components for UI sections and reusable UI elements with animations and effects.
+  </Card>
+
+  <Card title="src/app/" icon="route">
+    **Next.js App Router**
+    
+    API route handlers and page components following Next.js conventions.
+  </Card>
+
+  <Card title="src/lib/" icon="toolbox">
+    **Shared utilities**
+    
+    Reusable helper functions for sanitization, rate limiting, case conversion, and more.
+  </Card>
+</CardGroup>
+
+## Dependencies Overview
+
+<Accordion title="Core Dependencies">
+  ```json
+  {
+    "next": "16.1.6",              // React framework
+    "react": "19.2.3",             // UI library
+    "mongoose": "^9.2.4",          // MongoDB ODM
+    "typescript": "^5",            // Type safety
+    "tailwindcss": "^4"            // Styling
+  }
+  ```
+</Accordion>
+
+<Accordion title="Payment & External Services">
+  ```json
+  {
+    "stripe": "^20.4.1",                      // Stripe SDK
+    "@stripe/react-stripe-js": "^5.6.1",     // Stripe React components
+    "@paypal/react-paypal-js": "^9.0.1",     // PayPal SDK
+    "axios": "^1.13.6"                        // HTTP client (TMDB)
+  }
+  ```
+</Accordion>
+
+<Accordion title="UI & Animations">
+  ```json
+  {
+    "framer-motion": "^12.35.1",       // Animations
+    "lucide-react": "^0.577.0",        // Icons
+    "@tabler/icons-react": "^3.40.0",  // Additional icons
+    "tailwind-merge": "^3.5.0",        // Class merging
+    "clsx": "^2.1.1"                   // Conditional classes
+  }
+  ```
+</Accordion>
+
+## Development Workflow
+
+<CardGroup cols={3}>
+  <Card title="Add Feature" icon="plus">
+    1. Define entity in `domain/`
+    2. Create use case in `application/`
+    3. Implement repository in `infrastructure/`
+    4. Add API route in `app/api/`
+    5. Create UI in `presentation/`
+  </Card>
+
+  <Card title="Modify Business Logic" icon="pencil">
+    1. Update entity in `domain/entities/`
+    2. Adjust use case in `application/use-cases/`
+    3. Update DTOs if needed
+    4. Test changes
+  </Card>
+
+  <Card title="Change Database" icon="database">
+    1. Update model in `infrastructure/database/models/`
+    2. Adjust repository mapping
+    3. Update interfaces if schema changes
+    4. Migrate data if needed
+  </Card>
+</CardGroup>
+
+## Testing Strategy
+
+<Note>
+  The layered architecture makes testing straightforward - each layer can be tested independently.
+</Note>
+
+<Accordion title="Unit Tests">
+  **Domain Layer**:
+  - Test entity factory functions
+  - Test value object validation
+  - No mocking needed (pure functions)
+
+  **Application Layer**:
+  - Test use cases with mock repositories
+  - Verify workflow logic
+  - Test DTO mappings
+</Accordion>
+
+<Accordion title="Integration Tests">
+  **Infrastructure Layer**:
+  - Test repository implementations with test database
+  - Test external service clients with mock servers
+  - Test database connection
+
+  **Presentation Layer**:
+  - Test API routes with mock use cases
+  - Test component rendering
+  - Test user interactions
+</Accordion>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    High-level system architecture and design
+  </Card>
+
+  <Card title="Domain-Driven Design" icon="gem" href="/architecture/domain-driven-design">
+    Deep dive into DDD layers and patterns
+  </Card>
+
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Detailed API endpoint documentation
+  </Card>
+
+  <Card title="Development Guide" icon="hammer" href="/architecture/overview">
+    Setup and development workflow
+  </Card>
+</CardGroup>

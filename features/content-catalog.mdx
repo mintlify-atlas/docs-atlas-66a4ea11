@@ -1,0 +1,323 @@
+---
+title: 'Content Catalog'
+description: 'TMDB integration for streaming content discovery'
+icon: 'film'
+---
+
+## Overview
+
+Connect World leverages **The Movie Database (TMDB) API** to provide a rich catalog of movies and TV series. The platform fetches trending content, now playing movies, and top-rated series with localized Spanish content.
+
+<CardGroup cols={3}>
+  <Card title="Trending Content" icon="fire">
+    Discover what's popular daily and weekly
+  </Card>
+  <Card title="Now Playing" icon="play">
+    Current movies in theaters
+  </Card>
+  <Card title="Top Rated" icon="star">
+    Highest rated TV series
+  </Card>
+</CardGroup>
+
+## TMDB Service
+
+The TMDB integration is centralized in the `tmdbService.ts` file, providing a clean API for content fetching.
+
+### Configuration
+
+```typescript
+import axios from "axios";
+
+const TMDB_API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+const BASE_URL = "https://api.themoviedb.org/3";
+
+const tmdbClient = axios.create({
+  baseURL: BASE_URL,
+  params: { api_key: TMDB_API_KEY, language: "es-ES" },
+});
+```
+
+Source: `src/infrastructure/external/tmdbService.ts:3-27`
+
+<Note>
+  The service is configured with `language: "es-ES"` to provide Spanish-localized content including titles, descriptions, and metadata.
+</Note>
+
+## Data Models
+
+### TMDB Movie Interface
+
+```typescript
+export interface TmdbMovie {
+  id: number;
+  title?: string;
+  name?: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  overview: string;
+  vote_average: number;
+  release_date?: string;
+  first_air_date?: string;
+  genre_ids: number[];
+  media_type?: string;
+}
+```
+
+Source: `src/infrastructure/external/tmdbService.ts:6-18`
+
+<Accordion title="Field Descriptions">
+  - **id**: Unique TMDB identifier
+  - **title**: Movie title (for movies)
+  - **name**: Series name (for TV shows)
+  - **poster_path**: Poster image path (can be null)
+  - **backdrop_path**: Backdrop/banner image path (can be null)
+  - **overview**: Content description/synopsis
+  - **vote_average**: Rating score (0-10)
+  - **release_date**: Movie release date
+  - **first_air_date**: TV series first air date
+  - **genre_ids**: Array of genre identifiers
+  - **media_type**: Content type (movie/tv)
+</Accordion>
+
+### TMDB Response Interface
+
+```typescript
+export interface TmdbResponse {
+  results: TmdbMovie[];
+}
+```
+
+Source: `src/infrastructure/external/tmdbService.ts:20-22`
+
+## Content Fetching Functions
+
+<Tabs>
+  <Tab title="Trending Content">
+    ### Get Trending Content
+    
+    Fetch trending movies and TV shows for a specified time window:
+    
+    ```typescript
+    export async function getTrendingAll(timeWindow: "day" | "week" = "week"): Promise<TmdbMovie[]> {
+      const { data } = await tmdbClient.get<TmdbResponse>(`/trending/all/${timeWindow}`);
+      return data.results.slice(0, 10);
+    }
+    ```
+    
+    Source: `src/infrastructure/external/tmdbService.ts:29-32`
+    
+    **Parameters:**
+    - `timeWindow`: Either "day" or "week" (default: "week")
+    
+    **Returns:**
+    - Top 10 trending items (movies and TV shows combined)
+    
+    <Note>
+      The function automatically limits results to 10 items for performance and UI consistency.
+    </Note>
+  </Tab>
+  
+  <Tab title="Now Playing Movies">
+    ### Get Now Playing Movies
+    
+    Fetch movies currently playing in theaters:
+    
+    ```typescript
+    export async function getNowPlayingMovies(): Promise<TmdbMovie[]> {
+      const { data } = await tmdbClient.get<TmdbResponse>("/movie/now_playing");
+      return data.results.slice(0, 10);
+    }
+    ```
+    
+    Source: `src/infrastructure/external/tmdbService.ts:34-37`
+    
+    **Returns:**
+    - Top 10 movies currently in theaters
+    
+    **Use Case:**
+    - Perfect for showcasing current theatrical releases
+    - Updated regularly by TMDB
+  </Tab>
+  
+  <Tab title="Top Rated Series">
+    ### Get Top Rated TV Series
+    
+    Fetch the highest-rated TV series:
+    
+    ```typescript
+    export async function getTopRatedSeries(): Promise<TmdbMovie[]> {
+      const { data } = await tmdbClient.get<TmdbResponse>("/tv/top_rated");
+      return data.results.slice(0, 5);
+    }
+    ```
+    
+    Source: `src/infrastructure/external/tmdbService.ts:39-42`
+    
+    **Returns:**
+    - Top 5 highest-rated TV series
+    
+    <Note>
+      This function returns only 5 items instead of 10, likely for a more curated display section.
+    </Note>
+  </Tab>
+</Tabs>
+
+## Image Handling
+
+### Poster URL Generation
+
+Convert TMDB image paths to full URLs:
+
+```typescript
+export function getPosterUrl(path: string | null, size = "w500"): string {
+  if (!path) return "/images/placeholder.jpg";
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+```
+
+Source: `src/infrastructure/external/tmdbService.ts:44-47`
+
+**Parameters:**
+- `path`: The poster_path or backdrop_path from TMDB
+- `size`: Image size (default: "w500")
+
+**Available Sizes:**
+- Poster sizes: `w92`, `w154`, `w185`, `w342`, `w500`, `w780`, `original`
+- Backdrop sizes: `w300`, `w780`, `w1280`, `original`
+
+<Warning>
+  Always check if `path` is null before generating URLs. The function returns a placeholder image for null paths.
+</Warning>
+
+## Usage Example
+
+<CodeGroup>
+```typescript Fetch Trending
+import { getTrendingAll } from '@/infrastructure/external/tmdbService';
+
+// Fetch weekly trending content
+const weeklyTrending = await getTrendingAll('week');
+
+// Fetch daily trending content
+const dailyTrending = await getTrendingAll('day');
+```
+
+```typescript Fetch Now Playing
+import { getNowPlayingMovies } from '@/infrastructure/external/tmdbService';
+
+const nowPlaying = await getNowPlayingMovies();
+console.log(`${nowPlaying.length} movies now playing`);
+```
+
+```typescript Generate Poster URLs
+import { getPosterUrl } from '@/infrastructure/external/tmdbService';
+
+const movie = await getTrendingAll('week')[0];
+const posterUrl = getPosterUrl(movie.poster_path, 'w500');
+const backdropUrl = getPosterUrl(movie.backdrop_path, 'w1280');
+```
+</CodeGroup>
+
+## Content Display Patterns
+
+<Tabs>
+  <Tab title="Movie Title">
+    ```typescript
+    const displayTitle = movie.title || movie.name || 'Untitled';
+    ```
+    
+    Since movies use `title` and TV shows use `name`, always check both fields.
+  </Tab>
+  
+  <Tab title="Release Date">
+    ```typescript
+    const releaseDate = movie.release_date || movie.first_air_date;
+    const year = releaseDate ? new Date(releaseDate).getFullYear() : null;
+    ```
+    
+    Movies have `release_date`, TV shows have `first_air_date`.
+  </Tab>
+  
+  <Tab title="Rating Display">
+    ```typescript
+    const rating = movie.vote_average.toFixed(1);
+    const ratingPercentage = (movie.vote_average * 10).toFixed(0);
+    ```
+    
+    TMDB ratings are on a 0-10 scale.
+  </Tab>
+</Tabs>
+
+## Environment Configuration
+
+```bash
+NEXT_PUBLIC_TMDB_API_KEY=your_tmdb_api_key_here
+```
+
+<Note>
+  Get your TMDB API key by creating a free account at [https://www.themoviedb.org/](https://www.themoviedb.org/) and requesting an API key from your account settings.
+</Note>
+
+## API Endpoints Used
+
+<CardGroup cols={2}>
+  <Card title="Trending" icon="chart-line">
+    `GET /trending/all/{time_window}`
+    
+    Returns trending movies and TV shows
+  </Card>
+  <Card title="Now Playing" icon="film">
+    `GET /movie/now_playing`
+    
+    Returns current theatrical releases
+  </Card>
+  <Card title="Top Rated TV" icon="tv">
+    `GET /tv/top_rated`
+    
+    Returns highest-rated TV series
+  </Card>
+  <Card title="Images" icon="image">
+    `GET https://image.tmdb.org/t/p/{size}{path}`
+    
+    Returns poster and backdrop images
+  </Card>
+</CardGroup>
+
+## Best Practices
+
+1. **Always check for null images** - Use the `getPosterUrl` helper to handle null paths
+2. **Handle both movies and TV shows** - Check both `title`/`name` and `release_date`/`first_air_date`
+3. **Limit results** - The service already limits to 5-10 items per request
+4. **Use appropriate image sizes** - Choose based on display context to optimize bandwidth
+5. **Cache responses** - Consider caching TMDB responses to reduce API calls
+6. **Localization** - The service is configured for Spanish (`es-ES`) content
+7. **Error handling** - Implement try-catch blocks when calling these functions
+
+<Warning>
+  TMDB API has rate limits. Implement caching and avoid excessive requests to prevent rate limiting.
+</Warning>
+
+## Content Categories
+
+The TMDB service provides three main content categories:
+
+<Accordion title="Content Strategy">
+  **Trending (Weekly/Daily)**
+  - Most popular content across movies and TV
+  - Updated regularly by TMDB's algorithm
+  - Mix of new releases and popular classics
+  - Limited to 10 items for homepage display
+  
+  **Now Playing Movies**
+  - Current theatrical releases
+  - Updated as movies enter/leave theaters
+  - Relevant for time-sensitive promotions
+  - Limited to 10 items
+  
+  **Top Rated TV Series**
+  - Highest user-rated series
+  - More stable than trending content
+  - Great for showcasing quality content
+  - Limited to 5 items for curated selection
+</Accordion>

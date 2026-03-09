@@ -1,0 +1,854 @@
+---
+title: Installation
+description: Complete installation and configuration guide for Connect World
+---
+
+# Installation Guide
+
+This guide covers everything you need to install, configure, and deploy Connect World in both development and production environments.
+
+## System Requirements
+
+<CardGroup cols={2}>
+  <Card title="Node.js" icon="node-js">
+    Version 20 or higher required
+  </Card>
+  <Card title="MongoDB" icon="database">
+    Version 5.0 or higher (local or cloud)
+  </Card>
+  <Card title="Package Manager" icon="box">
+    npm, yarn, pnpm, or bun
+  </Card>
+  <Card title="Git" icon="git">
+    For version control and deployment
+  </Card>
+</CardGroup>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Install Node.js">
+    Download and install Node.js 20+ from [nodejs.org](https://nodejs.org/)
+    
+    Verify installation:
+    ```bash
+    node --version  # Should be v20.0.0 or higher
+    npm --version
+    ```
+  </Step>
+
+  <Step title="Clone Repository">
+    Clone the Connect World repository:
+    
+    ```bash
+    git clone <your-repository-url>
+    cd connect-world
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    Choose your preferred package manager:
+    
+    <CodeGroup>
+    ```bash npm
+    npm install
+    ```
+    
+    ```bash yarn
+    yarn install
+    ```
+    
+    ```bash pnpm
+    pnpm install
+    ```
+    
+    ```bash bun
+    bun install
+    ```
+    </CodeGroup>
+    
+    <Info>
+    The project uses Next.js 16, React 19, and TypeScript 5. All dependencies are locked in `package-lock.json`.
+    </Info>
+  </Step>
+</Steps>
+
+## Database Setup
+
+### Option 1: Local MongoDB
+
+<Steps>
+  <Step title="Install MongoDB">
+    <CodeGroup>
+    ```bash macOS
+    # Using Homebrew
+    brew tap mongodb/brew
+    brew install mongodb-community
+    ```
+    
+    ```bash Ubuntu/Debian
+    # Import MongoDB public GPG key
+    wget -qO - https://www.mongodb.org/static/pgp/server-7.0.asc | sudo apt-key add -
+    
+    # Add MongoDB repository
+    echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
+    
+    # Install MongoDB
+    sudo apt-get update
+    sudo apt-get install -y mongodb-org
+    ```
+    
+    ```bash Windows
+    # Download MSI installer from:
+    # https://www.mongodb.com/try/download/community
+    
+    # Or use Chocolatey
+    choco install mongodb
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Start MongoDB Service">
+    <CodeGroup>
+    ```bash macOS
+    brew services start mongodb-community
+    
+    # Verify it's running
+    brew services list | grep mongodb
+    ```
+    
+    ```bash Linux
+    sudo systemctl start mongod
+    sudo systemctl enable mongod  # Auto-start on boot
+    
+    # Check status
+    sudo systemctl status mongod
+    ```
+    
+    ```bash Windows
+    # MongoDB runs as a Windows Service after installation
+    net start MongoDB
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Verify Connection">
+    Test MongoDB connection:
+    
+    ```bash
+    mongosh
+    
+    # You should see:
+    # Current Mongosh Log ID: ...
+    # Connecting to: mongodb://127.0.0.1:27017
+    # Using MongoDB: 7.0.x
+    ```
+    
+    Create the database:
+    ```javascript
+    use connect-world
+    db.customers.insertOne({ test: true })
+    db.customers.deleteOne({ test: true })
+    ```
+  </Step>
+</Steps>
+
+### Option 2: Docker MongoDB
+
+<CodeGroup>
+```bash Quick Start
+# Run MongoDB in Docker
+docker run -d \
+  --name mongodb \
+  -p 27017:27017 \
+  -v mongodb_data:/data/db \
+  mongo:latest
+```
+
+```bash With Authentication
+# Run with username/password
+docker run -d \
+  --name mongodb \
+  -p 27017:27017 \
+  -e MONGO_INITDB_ROOT_USERNAME=admin \
+  -e MONGO_INITDB_ROOT_PASSWORD=secret \
+  -v mongodb_data:/data/db \
+  mongo:latest
+```
+
+```yaml Docker Compose
+# docker-compose.yml
+version: '3.8'
+services:
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: secret
+    volumes:
+      - mongodb_data:/data/db
+
+volumes:
+  mongodb_data:
+```
+</CodeGroup>
+
+<Info>
+MongoDB in Docker is perfect for development. For production, consider MongoDB Atlas for managed hosting.
+</Info>
+
+### Option 3: MongoDB Atlas (Cloud)
+
+<Steps>
+  <Step title="Create Atlas Account">
+    1. Go to [mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
+    2. Sign up for a free account
+    3. Create a new cluster (M0 free tier available)
+  </Step>
+
+  <Step title="Configure Database Access">
+    1. Navigate to **Database Access**
+    2. Click **Add New Database User**
+    3. Create username and password
+    4. Grant **Read and write to any database** permission
+  </Step>
+
+  <Step title="Configure Network Access">
+    1. Navigate to **Network Access**
+    2. Click **Add IP Address**
+    3. For development: Click **Allow Access from Anywhere** (0.0.0.0/0)
+    4. For production: Add your server's IP address
+  </Step>
+
+  <Step title="Get Connection String">
+    1. Click **Connect** on your cluster
+    2. Choose **Connect your application**
+    3. Copy the connection string:
+    
+    ```bash
+    mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/connect-world?retryWrites=true&w=majority
+    ```
+  </Step>
+</Steps>
+
+## Environment Configuration
+
+Create a `.env.local` file in the project root with all required variables:
+
+### Complete Configuration Template
+
+```bash .env.local
+# ============================================
+# DATABASE CONFIGURATION (REQUIRED)
+# ============================================
+
+# Local MongoDB
+MONGDB_URI=mongodb://localhost:27017/connect-world
+
+# Or MongoDB Atlas
+# MONGODB_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/connect-world?retryWrites=true&w=majority
+
+# Or Docker MongoDB with auth
+# MONGODB_URI=mongodb://admin:secret@localhost:27017/connect-world?authSource=admin
+
+# ============================================
+# STRIPE CONFIGURATION (REQUIRED)
+# ============================================
+
+# Get these from: https://dashboard.stripe.com/apikeys
+
+# Secret key (server-side, starts with sk_test_ or sk_live_)
+STRIPE_SECRET_KEY=sk_test_51xxxxx
+
+# Publishable key (client-side, starts with pk_test_ or pk_live_)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_51xxxxx
+
+# ============================================
+# PAYPAL CONFIGURATION (OPTIONAL)
+# ============================================
+
+# Get these from: https://developer.paypal.com/dashboard/
+
+# Client ID (public, used in frontend)
+NEXT_PUBLIC_PAYPAL_CLIENT_ID=AYourPayPalClientID123
+
+# Client Secret (private, server-side only)
+PAYPAL_CLIENT_SECRET=EYourPayPalClientSecret456
+
+# API Base URL
+# Sandbox for testing:
+PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
+# Production:
+# PAYPAL_BASE_URL=https://api-m.paypal.com
+
+# ============================================
+# TMDB API CONFIGURATION (OPTIONAL)
+# ============================================
+
+# Get API key from: https://www.themoviedb.org/settings/api
+# Required for content catalog display
+NEXT_PUBLIC_TMDB_API_KEY=your_tmdb_api_key_here
+
+# ============================================
+# ENVIRONMENT
+# ============================================
+
+NODE_ENV=development
+```
+
+### Environment Variables Reference
+
+<AccordionGroup>
+  <Accordion title="MONGODB_URI" icon="database">
+    **Required** - MongoDB connection string
+    
+    ```typescript From connection.ts
+    const MONGODB_URI = process.env.MONGODB_URI as string;
+    
+    if (!MONGODB_URI) {
+      throw new Error("Please define MONGODB_URI in .env.local");
+    }
+    ```
+    
+    The connection uses Mongoose with these options:
+    ```typescript
+    mongoose.connect(MONGODB_URI, {
+      bufferCommands: false,
+    });
+    ```
+  </Accordion>
+
+  <Accordion title="STRIPE_SECRET_KEY" icon="credit-card">
+    **Required** - Stripe secret API key (server-side)
+    
+    ```typescript From stripe/route.ts
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+    ```
+    
+    Used to:
+    - Create payment intents
+    - Process card payments
+    - Handle 3D Secure authentication
+    
+    Get from: [dashboard.stripe.com/apikeys](https://dashboard.stripe.com/apikeys)
+  </Accordion>
+
+  <Accordion title="NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY" icon="key">
+    **Required** - Stripe publishable key (client-side)
+    
+    Exposed to browser, safe to commit. Used to initialize Stripe Elements:
+    ```typescript
+    import { loadStripe } from '@stripe/stripe-js';
+    const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+    ```
+  </Accordion>
+
+  <Accordion title="NEXT_PUBLIC_PAYPAL_CLIENT_ID" icon="paypal">
+    **Optional** - PayPal client ID (public)
+    
+    ```typescript From paypal/create-order/route.ts
+    const credentials = Buffer.from(
+      `${process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+    ).toString('base64');
+    ```
+    
+    Used for PayPal authentication and order creation.
+  </Accordion>
+
+  <Accordion title="PAYPAL_CLIENT_SECRET" icon="lock">
+    **Optional** - PayPal client secret (private)
+    
+    Server-side only. Combined with client ID for OAuth token generation:
+    ```typescript
+    async function getPayPalAccessToken(): Promise<string> {
+      const credentials = Buffer.from(
+        `${process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+      ).toString('base64');
+      // ... request access token
+    }
+    ```
+  </Accordion>
+
+  <Accordion title="PAYPAL_BASE_URL" icon="globe">
+    **Optional** - PayPal API endpoint
+    
+    ```typescript
+    const PAYPAL_BASE = process.env.PAYPAL_BASE_URL ?? "https://api-m.sandbox.paypal.com";
+    ```
+    
+    - Sandbox: `https://api-m.sandbox.paypal.com` (testing)
+    - Production: `https://api-m.paypal.com` (live payments)
+  </Accordion>
+
+  <Accordion title="NEXT_PUBLIC_TMDB_API_KEY" icon="film">
+    **Optional** - The Movie Database API key
+    
+    ```typescript From tmdbService.ts
+    const TMDB_API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+    const tmdbClient = axios.create({
+      baseURL: BASE_URL,
+      params: { api_key: TMDB_API_KEY, language: "es-ES" },
+    });
+    ```
+    
+    Used to fetch:
+    - Trending movies and TV shows
+    - Now playing movies
+    - Top rated series
+    
+    App works without it, but catalog will be empty.
+  </Accordion>
+</AccordionGroup>
+
+## Payment Provider Setup
+
+### Stripe Configuration
+
+<Steps>
+  <Step title="Create Stripe Account">
+    1. Sign up at [stripe.com](https://stripe.com)
+    2. Complete account verification
+    3. Enable test mode (toggle in dashboard)
+  </Step>
+
+  <Step title="Get API Keys">
+    1. Go to [dashboard.stripe.com/apikeys](https://dashboard.stripe.com/apikeys)
+    2. Copy **Publishable key** (starts with `pk_test_`)
+    3. Reveal and copy **Secret key** (starts with `sk_test_`)
+    4. Add both to `.env.local`
+  </Step>
+
+  <Step title="Test Payment">
+    Use Stripe test cards:
+    
+    | Card Number | Result |
+    |-------------|--------|
+    | 4242 4242 4242 4242 | Success |
+    | 4000 0025 0000 3155 | Requires 3D Secure |
+    | 4000 0000 0000 9995 | Card declined |
+    
+    - Expiry: Any future date
+    - CVC: Any 3 digits
+    - ZIP: Any 5 digits
+  </Step>
+</Steps>
+
+### PayPal Configuration (Optional)
+
+<Steps>
+  <Step title="Create Developer Account">
+    1. Go to [developer.paypal.com](https://developer.paypal.com)
+    2. Log in or create account
+    3. Navigate to **Dashboard**
+  </Step>
+
+  <Step title="Create Sandbox App">
+    1. Click **Apps & Credentials**
+    2. Ensure **Sandbox** tab is selected
+    3. Click **Create App**
+    4. Name your app and click **Create App**
+  </Step>
+
+  <Step title="Get Credentials">
+    1. Copy **Client ID** → `NEXT_PUBLIC_PAYPAL_CLIENT_ID`
+    2. Click **Show** under Secret → `PAYPAL_CLIENT_SECRET`
+    3. Set `PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com`
+  </Step>
+
+  <Step title="Create Test Accounts">
+    1. Go to **Sandbox → Accounts**
+    2. Create a **Business** account (merchant)
+    3. Create a **Personal** account (buyer)
+    4. Use the personal account email/password for test purchases
+  </Step>
+</Steps>
+
+<Warning>
+For production PayPal, switch to **Live** credentials and update `PAYPAL_BASE_URL` to `https://api-m.paypal.com`
+</Warning>
+
+## TMDB API Setup (Optional)
+
+<Steps>
+  <Step title="Create TMDB Account">
+    1. Sign up at [themoviedb.org](https://www.themoviedb.org/)
+    2. Verify your email
+    3. Log in to your account
+  </Step>
+
+  <Step title="Request API Key">
+    1. Go to **Settings → API**
+    2. Click **Request an API Key**
+    3. Choose **Developer** (free for non-commercial)
+    4. Fill out the application form
+    5. Accept terms and submit
+  </Step>
+
+  <Step title="Copy API Key">
+    1. Copy your **API Key (v3 auth)**
+    2. Add to `.env.local` as `NEXT_PUBLIC_TMDB_API_KEY`
+  </Step>
+
+  <Step title="Verify Integration">
+    The app uses these TMDB endpoints:
+    
+    ```typescript From tmdbService.ts
+    // Fetch trending content
+    export async function getTrendingAll(timeWindow: "day" | "week" = "week") {
+      const { data } = await tmdbClient.get<TmdbResponse>(
+        `/trending/all/${timeWindow}`
+      );
+      return data.results.slice(0, 10);
+    }
+    
+    // Fetch now playing movies
+    export async function getNowPlayingMovies() {
+      const { data } = await tmdbClient.get<TmdbResponse>(
+        "/movie/now_playing"
+      );
+      return data.results.slice(0, 10);
+    }
+    
+    // Fetch top rated series
+    export async function getTopRatedSeries() {
+      const { data } = await tmdbClient.get<TmdbResponse>(
+        "/tv/top_rated"
+      );
+      return data.results.slice(0, 5);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Running the Application
+
+### Development Mode
+
+<CodeGroup>
+```bash npm
+npm run dev
+```
+
+```bash yarn
+yarn dev
+```
+
+```bash pnpm
+pnpm dev
+```
+
+```bash bun
+bun dev
+```
+</CodeGroup>
+
+The app will start at `http://localhost:3000`
+
+<Info>
+Next.js 16 uses Turbopack by default for faster development builds.
+</Info>
+
+### Production Build
+
+<Steps>
+  <Step title="Build Application">
+    <CodeGroup>
+    ```bash npm
+    npm run build
+    ```
+    
+    ```bash yarn
+    yarn build
+    ```
+    
+    ```bash pnpm
+    pnpm build
+    ```
+    </CodeGroup>
+    
+    This creates an optimized production build in `.next/`
+  </Step>
+
+  <Step title="Start Production Server">
+    <CodeGroup>
+    ```bash npm
+    npm run start
+    ```
+    
+    ```bash yarn
+    yarn start
+    ```
+    
+    ```bash pnpm
+    pnpm start
+    ```
+    </CodeGroup>
+  </Step>
+</Steps>
+
+### Linting
+
+```bash
+npm run lint
+```
+
+The project uses ESLint with Next.js configuration:
+```javascript From eslint.config.mjs
+import { dirname } from "path";
+import { fileURLToPath } from "url";
+import { FlatCompat } from "@eslint/eslintrc";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const compat = new FlatCompat({
+  baseDirectory: __dirname,
+});
+
+const eslintConfig = [
+  ...compat.extends("next/core-web-vitals", "next/typescript"),
+];
+
+export default eslintConfig;
+```
+
+## Database Schema
+
+Connect World uses two main collections:
+
+### Customers Collection
+
+```typescript From CustomerModel.ts
+export interface CustomerDbDoc extends Document {
+  email: string;
+  phone: string;
+  name: string;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const CustomerSchema = new Schema<CustomerDbDoc>(
+  {
+    email: { type: String, required: true, unique: true, lowercase: true },
+    phone: { type: String, required: true },
+    name:  { type: String, required: true },
+  },
+  {
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+  }
+);
+```
+
+### Orders Collection
+
+```typescript From OrderModel.ts
+export interface OrderDbDoc extends Document {
+  customer_id: string;
+  plan_id: string;
+  devices: number;
+  months: number;
+  amount: number;
+  payment_method: "stripe" | "paypal";
+  payment_receipt_id: string;
+  status: "pending" | "completed" | "failed";
+  activation_date: Date;
+  expiration_date: Date;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const OrderSchema = new Schema<OrderDbDoc>(
+  {
+    customer_id:        { type: String, required: true, index: true },
+    plan_id:            { type: String, required: true },
+    devices:            { type: Number, required: true },
+    months:             { type: Number, required: true },
+    amount:             { type: Number, required: true },
+    payment_method:     { type: String, enum: ["stripe", "paypal"], required: true },
+    payment_receipt_id: { type: String, required: true, unique: true },
+    status:             { type: String, enum: ["pending", "completed", "failed"], default: "pending" },
+    activation_date:    { type: Date, required: true },
+    expiration_date:    { type: Date, required: true },
+  },
+  {
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
+  }
+);
+```
+
+<Note>
+The schema uses snake_case for MongoDB fields following common NoSQL conventions, while the application layer uses camelCase.
+</Note>
+
+## Security Configuration
+
+Connect World includes comprehensive security headers:
+
+```typescript From next.config.ts
+const securityHeaders = [
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(), geolocation=(), payment=(self)",
+  },
+  { key: "X-XSS-Protection", value: "1; mode=block" },
+  {
+    key: "Strict-Transport-Security",
+    value: "max-age=63072000; includeSubDomains; preload",
+  },
+  {
+    key: "Content-Security-Policy",
+    value: [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com https://www.paypal.com https://www.sandbox.paypal.com",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://image.tmdb.org https://www.paypalobjects.com",
+      "font-src 'self' data:",
+      "connect-src 'self' https://api.stripe.com https://api-m.sandbox.paypal.com https://api-m.paypal.com https://api.themoviedb.org",
+      "frame-src https://js.stripe.com https://hooks.stripe.com https://www.paypal.com https://www.sandbox.paypal.com",
+    ].join("; "),
+  },
+];
+```
+
+<Warning>
+Adjust CSP headers for your domain before production deployment.
+</Warning>
+
+## Verification Checklist
+
+Before deploying, verify all components:
+
+<Steps>
+  <Step title="Database Connection">
+    ```bash
+    # Test MongoDB connection
+    mongosh $MONGODB_URI
+    
+    # Check collections
+    use connect-world
+    show collections
+    ```
+  </Step>
+
+  <Step title="Environment Variables">
+    ```bash
+    # Verify all required vars are set
+    node -e "console.log({
+      MONGODB_URI: !!process.env.MONGODB_URI,
+      STRIPE_SECRET: !!process.env.STRIPE_SECRET_KEY,
+      STRIPE_PUBLIC: !!process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+    })"
+    ```
+  </Step>
+
+  <Step title="Build Success">
+    ```bash
+    npm run build
+    # Should complete without errors
+    ```
+  </Step>
+
+  <Step title="API Endpoints">
+    ```bash
+    # Start server
+    npm run dev
+    
+    # Test health
+    curl http://localhost:3000
+    
+    # Test TMDB
+    curl http://localhost:3000/api/tmdb
+    ```
+  </Step>
+
+  <Step title="Payment Test">
+    1. Navigate to `http://localhost:3000`
+    2. Select a plan
+    3. Use Stripe test card: `4242 4242 4242 4242`
+    4. Complete checkout
+    5. Verify order in MongoDB:
+    ```bash
+    mongosh
+    use connect-world
+    db.orders.find().pretty()
+    ```
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Module not found errors">
+    Clear and reinstall dependencies:
+    ```bash
+    rm -rf node_modules package-lock.json
+    npm install
+    ```
+  </Accordion>
+
+  <Accordion title="Port 3000 already in use">
+    Change the port:
+    ```bash
+    PORT=3001 npm run dev
+    ```
+    
+    Or kill the process using port 3000:
+    ```bash
+    # macOS/Linux
+    lsof -ti:3000 | xargs kill -9
+    
+    # Windows
+    netstat -ano | findstr :3000
+    taskkill /PID <PID> /F
+    ```
+  </Accordion>
+
+  <Accordion title="MongoDB connection timeout">
+    Check MongoDB is running:
+    ```bash
+    # macOS
+    brew services list | grep mongodb
+    
+    # Linux
+    sudo systemctl status mongod
+    
+    # Docker
+    docker ps | grep mongo
+    ```
+    
+    Test connection:
+    ```bash
+    mongosh mongodb://localhost:27017
+    ```
+  </Accordion>
+
+  <Accordion title="Stripe webhook errors (production)">
+    For production, set up Stripe webhooks:
+    1. Go to [dashboard.stripe.com/webhooks](https://dashboard.stripe.com/webhooks)
+    2. Add endpoint: `https://yourdomain.com/api/webhooks/stripe`
+    3. Select events: `payment_intent.succeeded`, `payment_intent.payment_failed`
+    4. Add webhook secret to `.env.local`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Test your installation with your first subscription
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore available endpoints and data models
+  </Card>
+  <Card title="Development" icon="wrench" href="/architecture/overview">
+    Learn the architecture and development workflow
+  </Card>
+  <Card title="Deployment" icon="cloud" href="/installation">
+    Deploy to Vercel, AWS, or your own infrastructure
+  </Card>
+</CardGroup>

@@ -1,80 +1,129 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Get Connect World up and running in minutes"
 ---
 
-## Get started in three steps
+Connect World is a streaming service platform with multi-tier subscriptions and integrated payment processing. This guide will help you get started quickly.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Clone and Install Dependencies">
+    Clone the repository and install the required packages.
 
-### Step 1: Set up your local environment
+    <CodeGroup>
+    ```bash npm
+    git clone https://github.com/otniel0820/connect-world-v1.git
+    cd connect-world-v1
+    npm install
+    ```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+    ```bash yarn
+    git clone https://github.com/otniel0820/connect-world-v1.git
+    cd connect-world-v1
+    yarn install
+    ```
+
+    ```bash pnpm
+    git clone https://github.com/otniel0820/connect-world-v1.git
+    cd connect-world-v1
+    pnpm install
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure Environment Variables">
+    Create a `.env.local` file in the root directory with the following variables:
+
+    ```bash .env.local
+    # MongoDB Connection
+    MONGODB_URI=mongodb://localhost:27017/connect-world
+
+    # Stripe Configuration
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_key
+    STRIPE_SECRET_KEY=sk_test_your_key
+
+    # PayPal Configuration
+    NEXT_PUBLIC_PAYPAL_CLIENT_ID=your_paypal_client_id
+    PAYPAL_CLIENT_SECRET=your_paypal_client_secret
+
+    # TMDB API (Optional - for content catalog)
+    NEXT_PUBLIC_TMDB_API_KEY=your_tmdb_api_key
+    ```
+
+    <Note>
+    You'll need to create accounts with Stripe and PayPal to get your API credentials. See the [Installation](/installation) guide for detailed setup instructions.
+    </Note>
+  </Step>
+
+  <Step title="Start MongoDB">
+    Make sure MongoDB is running on your system.
+
+    ```bash
+    # If using local MongoDB
+    mongod
+
+    # Or using Docker
+    docker run -d -p 27017:27017 --name mongodb mongo:latest
+    ```
+  </Step>
+
+  <Step title="Run the Development Server">
+    Start the Next.js development server.
+
+    <CodeGroup>
+    ```bash npm
+    npm run dev
+    ```
+
+    ```bash yarn
+    yarn dev
+    ```
+
+    ```bash pnpm
+    pnpm dev
+    ```
+    </CodeGroup>
+
+    Open [http://localhost:3000](http://localhost:3000) in your browser to see the application.
+  </Step>
+
+  <Step title="Test a Subscription Flow">
+    Navigate to the Plans section and select a subscription tier:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    - **Basic Plan**: 1 device, from $10/month
+    - **Standard Plan**: 2 devices, from $15/month (Popular)
+    - **Premium Plan**: 3 devices, 4K support, from $15/month
 
-### Step 2: Deploy your changes
+    Use Stripe's test card number `4242 4242 4242 4242` to complete a test payment.
+  </Step>
+</Steps>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
+## Next Steps
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Explore Features" icon="star" href="/features/subscription-plans">
+    Learn about subscription plans, payment processing, and content catalog
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture/overview">
+    Understand the system design and domain-driven architecture
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Security" icon="shield" href="/security/rate-limiting">
+    Review security features including rate limiting and validation
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Need Help?
+
+<Accordion title="The development server won't start">
+  Make sure all dependencies are installed and MongoDB is running. Check that your Node.js version is 18 or higher.
+</Accordion>
+
+<Accordion title="Payment integration isn't working">
+  Verify that your Stripe or PayPal API keys are correctly set in `.env.local`. For testing, use Stripe test mode keys (starting with `pk_test_` and `sk_test_`).
+</Accordion>
+
+<Accordion title="Content catalog is empty">
+  The TMDB API key is optional. If not configured, the catalog section will be empty. Sign up for a free TMDB API key at [https://www.themoviedb.org/settings/api](https://www.themoviedb.org/settings/api).
+</Accordion>

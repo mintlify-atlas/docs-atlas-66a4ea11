@@ -1,0 +1,405 @@
+---
+title: 'Domain Entities'
+description: 'Core domain entities representing business objects in Connect World'
+---
+
+# Domain Entities
+
+Entities are the core business objects in the domain layer. Each entity has a unique identity and represents a key concept in the Connect World streaming service.
+
+## Customer
+
+Represents a customer in the system with contact information and metadata.
+
+### Interface
+
+```typescript src/domain/entities/Customer.ts
+export interface Customer {
+  id?: string;
+  email: string;
+  phone: string;
+  name: string;
+  createdAt?: Date;
+}
+```
+
+<ResponseField name="id" type="string" optional>
+  Unique identifier for the customer (auto-generated)
+</ResponseField>
+
+<ResponseField name="email" type="string" required>
+  Customer's email address
+</ResponseField>
+
+<ResponseField name="phone" type="string" required>
+  Customer's phone number
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Customer's full name
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" optional>
+  Timestamp when the customer was created (auto-generated)
+</ResponseField>
+
+### Factory Function
+
+```typescript
+function createCustomer(
+  data: Omit<Customer, "id" | "createdAt">
+): Customer
+```
+
+Creates a new customer with auto-generated timestamps.
+
+<Accordion title="Example Usage">
+```typescript
+import { createCustomer } from '@/domain/entities/Customer';
+import { Email } from '@/domain/value-objects/Email';
+import { Phone } from '@/domain/value-objects/Phone';
+
+const email = new Email('john@example.com');
+const phone = new Phone('+1234567890');
+
+const customer = createCustomer({
+  name: 'John Doe',
+  email: email.toString(),
+  phone: phone.toString(),
+});
+
+// customer.createdAt is automatically set to new Date()
+```
+</Accordion>
+
+---
+
+## Order
+
+Represents a subscription order for a streaming plan.
+
+### Interface
+
+```typescript src/domain/entities/Order.ts
+export interface Order {
+  id?: string;
+  customerId: string;
+  planId: string;
+  devices: number;
+  months: number;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paymentReceiptId: string;
+  status: OrderStatus;
+  activationDate: Date;
+  expirationDate: Date;
+  createdAt?: Date;
+}
+```
+
+<ResponseField name="id" type="string" optional>
+  Unique identifier for the order (auto-generated)
+</ResponseField>
+
+<ResponseField name="customerId" type="string" required>
+  Reference to the customer who placed the order
+</ResponseField>
+
+<ResponseField name="planId" type="string" required>
+  Reference to the subscription plan
+</ResponseField>
+
+<ResponseField name="devices" type="number" required>
+  Number of simultaneous devices allowed (1, 2, or 3)
+</ResponseField>
+
+<ResponseField name="months" type="number" required>
+  Subscription duration in months (1, 2, 3, 6, or 12)
+</ResponseField>
+
+<ResponseField name="amount" type="number" required>
+  Total payment amount
+</ResponseField>
+
+<ResponseField name="paymentMethod" type="PaymentMethod" required>
+  Payment method used: `"stripe"` or `"paypal"`
+</ResponseField>
+
+<ResponseField name="paymentReceiptId" type="string" required>
+  Payment gateway receipt/transaction ID
+</ResponseField>
+
+<ResponseField name="status" type="OrderStatus" required>
+  Order status: `"pending"`, `"completed"`, or `"failed"`
+</ResponseField>
+
+<ResponseField name="activationDate" type="Date" required>
+  When the subscription becomes active (auto-generated)
+</ResponseField>
+
+<ResponseField name="expirationDate" type="Date" required>
+  When the subscription expires (auto-calculated based on months)
+</ResponseField>
+
+<ResponseField name="createdAt" type="Date" optional>
+  Timestamp when the order was created (auto-generated)
+</ResponseField>
+
+### Type Definitions
+
+<Tabs>
+  <Tab title="PaymentMethod">
+    ```typescript
+    export type PaymentMethod = "stripe" | "paypal";
+    ```
+    
+    Supported payment gateways for processing orders.
+  </Tab>
+  
+  <Tab title="OrderStatus">
+    ```typescript
+    export type OrderStatus = "pending" | "completed" | "failed";
+    ```
+    
+    Current state of the order in the payment workflow.
+  </Tab>
+</Tabs>
+
+### Factory Function
+
+```typescript
+function createOrder(
+  data: Omit<Order, "id" | "createdAt" | "activationDate" | "expirationDate">
+): Order
+```
+
+Creates a new order with auto-generated dates and timestamps.
+
+<Expandable title="Implementation Details">
+The factory function automatically:
+- Sets `activationDate` to the current date
+- Calculates `expirationDate` by adding the specified months to the activation date
+- Sets `createdAt` to the current timestamp
+
+```typescript src/domain/entities/Order.ts
+export function createOrder(data: Omit<Order, "id" | "createdAt" | "activationDate" | "expirationDate">): Order {
+  const activationDate = new Date();
+  const expirationDate = new Date();
+  expirationDate.setMonth(expirationDate.getMonth() + data.months);
+
+  return {
+    ...data,
+    activationDate,
+    expirationDate,
+    createdAt: new Date(),
+  };
+}
+```
+</Expandable>
+
+<Accordion title="Example Usage">
+```typescript
+import { createOrder } from '@/domain/entities/Order';
+
+const order = createOrder({
+  customerId: 'cust_123',
+  planId: 'plan-2',
+  devices: 2,
+  months: 6,
+  amount: 70,
+  paymentMethod: 'stripe',
+  paymentReceiptId: 'pi_abc123',
+  status: 'completed',
+});
+
+// order.activationDate is set to now
+// order.expirationDate is set to 6 months from now
+// order.createdAt is set to new Date()
+```
+</Accordion>
+
+---
+
+## Plan
+
+Represents a subscription plan with pricing tiers and features.
+
+### Interface
+
+```typescript src/domain/entities/Plan.ts
+export interface Plan {
+  id: string;
+  devices: DeviceCount;
+  name: string;
+  description: string;
+  prices: PlanPrice[];
+  features: string[];
+  popular?: boolean;
+}
+```
+
+<ResponseField name="id" type="string" required>
+  Unique identifier for the plan (e.g., `"plan-1"`, `"plan-2"`, `"plan-3"`)
+</ResponseField>
+
+<ResponseField name="devices" type="DeviceCount" required>
+  Number of simultaneous devices: `1`, `2`, or `3`
+</ResponseField>
+
+<ResponseField name="name" type="string" required>
+  Plan name: `"Basic"`, `"Standard"`, or `"Premium"`
+</ResponseField>
+
+<ResponseField name="description" type="string" required>
+  Human-readable description of the plan
+</ResponseField>
+
+<ResponseField name="prices" type="PlanPrice[]" required>
+  Array of pricing options for different durations
+</ResponseField>
+
+<ResponseField name="features" type="string[]" required>
+  List of features included in this plan
+</ResponseField>
+
+<ResponseField name="popular" type="boolean" optional>
+  Whether this plan should be highlighted as popular (true for Standard plan)
+</ResponseField>
+
+### Type Definitions
+
+<Tabs>
+  <Tab title="DeviceCount">
+    ```typescript
+    export type DeviceCount = 1 | 2 | 3;
+    ```
+    
+    Number of simultaneous streaming devices allowed.
+  </Tab>
+  
+  <Tab title="PlanDuration">
+    ```typescript
+    export type PlanDuration = 1 | 2 | 3 | 6 | 12;
+    ```
+    
+    Subscription duration in months.
+  </Tab>
+  
+  <Tab title="PlanPrice">
+    ```typescript
+    export interface PlanPrice {
+      months: PlanDuration;
+      price: number;
+      label: string;
+    }
+    ```
+    
+    Pricing information for a specific duration.
+    
+    <ResponseField name="months" type="PlanDuration" required>
+      Duration in months
+    </ResponseField>
+    
+    <ResponseField name="price" type="number" required>
+      Price for this duration
+    </ResponseField>
+    
+    <ResponseField name="label" type="string" required>
+      Display label (e.g., `"1 mes"`, `"6 meses"`)
+    </ResponseField>
+  </Tab>
+</Tabs>
+
+### Factory Function
+
+```typescript
+function createPlan(devices: DeviceCount): Plan
+```
+
+Creates a subscription plan with predefined pricing and features.
+
+<Expandable title="Pricing Structure">
+The pricing matrix for all plans:
+
+| Devices | 1 Month | 2 Months | 3 Months | 6 Months | 12 Months |
+|---------|---------|----------|----------|----------|-----------|
+| 1       | $10     | $20      | $30      | $60      | $120      |
+| 2       | $15     | $25      | $35      | $70      | $140      |
+| 3       | $15     | $30      | $45      | $80      | $149      |
+</Expandable>
+
+<Accordion title="Example Usage">
+```typescript
+import { createPlan, PLANS } from '@/domain/entities/Plan';
+
+// Create a single plan
+const standardPlan = createPlan(2);
+
+console.log(standardPlan);
+// {
+//   id: 'plan-2',
+//   devices: 2,
+//   name: 'Standard',
+//   description: 'Disfruta Connect World en 2 dispositivos',
+//   prices: [
+//     { months: 1, price: 15, label: '1 mes' },
+//     { months: 2, price: 25, label: '2 meses' },
+//     // ... more pricing tiers
+//   ],
+//   features: [
+//     '2 dispositivos simultáneos',
+//     'HD & Full HD',
+//     'Acceso ilimitado a catálogo',
+//     'Perfiles personalizados',
+//     'Soporte 24/7'
+//   ],
+//   popular: true
+// }
+
+// Use predefined plans
+import { PLANS } from '@/domain/entities/Plan';
+const [basic, standard, premium] = PLANS;
+```
+</Accordion>
+
+### Predefined Plans
+
+```typescript
+export const PLANS: Plan[] = [
+  createPlan(1),  // Basic
+  createPlan(2),  // Standard (popular)
+  createPlan(3),  // Premium
+];
+```
+
+A constant array containing all three subscription plans, ready to use.
+
+<Expandable title="Plan Features">
+<Tabs>
+  <Tab title="Basic (1 Device)">
+    - 1 dispositivo simultáneo
+    - HD & Full HD
+    - Acceso ilimitado a catálogo
+    - Soporte 24/7
+  </Tab>
+  
+  <Tab title="Standard (2 Devices)">
+    - 2 dispositivos simultáneos
+    - HD & Full HD
+    - Acceso ilimitado a catálogo
+    - Perfiles personalizados
+    - Soporte 24/7
+    
+    **Marked as popular**
+  </Tab>
+  
+  <Tab title="Premium (3 Devices)">
+    - 3 dispositivos simultáneos
+    - 4K Ultra HD
+    - Acceso ilimitado a catálogo
+    - Perfiles personalizados
+    - Descargas offline
+    - Soporte prioritario 24/7
+  </Tab>
+</Tabs>
+</Expandable>

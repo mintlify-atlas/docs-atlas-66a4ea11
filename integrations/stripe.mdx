@@ -1,0 +1,296 @@
+---
+title: 'Stripe Integration'
+description: 'Set up Stripe payment processing for subscription plans'
+icon: 'stripe'
+---
+
+## Overview
+
+Connect World uses Stripe for secure credit and debit card payment processing. The integration handles payment intent creation, validation, and includes built-in rate limiting and security measures.
+
+## Prerequisites
+
+- Stripe account ([sign up here](https://dashboard.stripe.com/register))
+- API keys from the Stripe Dashboard
+- Next.js application with API routes
+
+## Environment Configuration
+
+<Steps>
+  <Step title="Get your Stripe API keys">
+    Navigate to the [Stripe Dashboard](https://dashboard.stripe.com/test/apikeys) and copy your keys:
+    - **Publishable key** - Used on the client-side
+    - **Secret key** - Used on the server-side
+  </Step>
+
+  <Step title="Add environment variables">
+    Add these variables to your `.env.local` file:
+
+    ```bash .env.local
+    STRIPE_SECRET_KEY=sk_test_your_secret_key_here
+    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_your_publishable_key_here
+    ```
+
+    <Warning>
+      Never commit your secret key to version control. Keep it secure in environment variables only.
+    </Warning>
+  </Step>
+
+  <Step title="Install Stripe dependencies">
+    ```bash
+    npm install stripe @stripe/stripe-js @stripe/react-stripe-js
+    ```
+  </Step>
+</Steps>
+
+## Server-Side Implementation
+
+### Payment Intent Creation
+
+The payment intent API route handles secure payment creation with validation and rate limiting.
+
+**File:** `src/app/api/stripe/route.ts`
+
+<CodeGroup>
+```typescript route.ts
+import { NextRequest, NextResponse } from "next/server";
+import Stripe from "stripe";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { sanitizeNumber, sanitizeString } from "@/lib/sanitize";
+import { PLANS } from "@/domain/entities/Plan";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+
+const VALID_MONTHS = [1, 2, 3, 6, 12] as const;
+
+export async function POST(req: NextRequest) {
+  // Rate limit: 10 payment-intent attempts per IP per 15 minutes
+  const ip = getClientIp(req);
+  if (!checkRateLimit(`stripe:${ip}`, 10, 15 * 60 * 1000)) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again in a few minutes." },
+      { status: 429 }
+    );
+  }
+
+  try {
+    const body = await req.json();
+
+    const planId = sanitizeString(body.planId, 50);
+    const months = sanitizeNumber(body.months, 1, 12);
+    const amount = sanitizeNumber(body.amount, 1, 10000);
+
+    if (!planId || months === null || amount === null) {
+      return NextResponse.json({ error: "Invalid data." }, { status: 400 });
+    }
+
+    // Validate planId exists and months is a valid duration
+    const plan = PLANS.find((p) => p.id === planId);
+    if (!plan) {
+      return NextResponse.json({ error: "Invalid plan." }, { status: 400 });
+    }
+    if (!(VALID_MONTHS as readonly number[]).includes(months)) {
+      return NextResponse.json({ error: "Invalid duration." }, { status: 400 });
+    }
+
+    // Validate amount matches the real price (prevents price tampering)
+    const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+    if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+      return NextResponse.json({ error: "Invalid amount." }, { status: 400 });
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: "usd",
+      automatic_payment_methods: { enabled: true },
+      metadata: { planId, months: String(months) },
+    });
+
+    return NextResponse.json({ clientSecret: paymentIntent.client_secret });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    console.error("[POST /api/stripe]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+```
+</CodeGroup>
+
+<Note>
+  **Security Features:**
+  - Rate limiting (10 attempts per 15 minutes per IP)
+  - Input sanitization for all user data
+  - Server-side price validation to prevent tampering
+  - Plan and duration validation against allowed values
+</Note>
+
+## Client-Side Implementation
+
+### Initialize Stripe
+
+Load Stripe.js and wrap your payment form with the Elements provider.
+
+```tsx CheckoutModal.tsx
+import { loadStripe } from "@stripe/stripe-js";
+import {
+  Elements,
+  CardElement,
+  useStripe,
+  useElements,
+} from "@stripe/react-stripe-js";
+
+const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
+);
+
+// Wrap your checkout component
+<Elements stripe={stripePromise}>
+  <CheckoutForm />
+</Elements>
+```
+
+### Payment Form Implementation
+
+```tsx CheckoutForm.tsx
+const stripe = useStripe();
+const elements = useElements();
+
+const handleStripeSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!stripe || !elements) return;
+  
+  setLoading(true);
+  setError(null);
+
+  try {
+    // 1. Create payment intent on server
+    const { data } = await axios.post("/api/stripe", {
+      amount: price,
+      planId: plan.id,
+      months
+    });
+
+    // 2. Confirm card payment
+    const cardElement = elements.getElement(CardElement);
+    if (!cardElement) throw new Error("Card element not found");
+
+    const { error: stripeError, paymentIntent } = await stripe.confirmCardPayment(
+      data.clientSecret,
+      {
+        payment_method: {
+          card: cardElement,
+          billing_details: { name: form.name, email: form.email },
+        },
+      }
+    );
+
+    if (stripeError) throw new Error(stripeError.message);
+
+    // 3. Create order record
+    const { data: order } = await axios.post("/api/orders", {
+      name: form.name,
+      email: form.email,
+      phone: fullPhone,
+      planId: plan.id,
+      devices: plan.devices,
+      months,
+      amount: price,
+      paymentMethod: "stripe",
+      paymentReceiptId: paymentIntent!.id,
+    });
+
+    onPaymentSuccess({
+      orderId: order.orderId,
+      expirationDate: order.expirationDate,
+      // ... other order details
+    });
+  } catch (err: unknown) {
+    setError(err instanceof Error ? err.message : "Payment failed");
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+## Payment Flow
+
+<Steps>
+  <Step title="Client requests payment intent">
+    The client sends plan details (planId, months, amount) to `/api/stripe`
+  </Step>
+
+  <Step title="Server validates and creates intent">
+    The server:
+    - Validates the plan exists
+    - Verifies price matches expected amount
+    - Creates a Stripe PaymentIntent
+    - Returns the `clientSecret`
+  </Step>
+
+  <Step title="Client confirms payment">
+    Using the `clientSecret`, the client calls `stripe.confirmCardPayment()` with card details
+  </Step>
+
+  <Step title="Payment success">
+    On successful payment, create an order record with the `paymentIntent.id` as receipt
+  </Step>
+</Steps>
+
+## Testing
+
+### Test Card Numbers
+
+Use these test cards in development:
+
+| Card Number | Description |
+|-------------|-------------|
+| `4242 4242 4242 4242` | Successful payment |
+| `4000 0000 0000 9995` | Declined payment |
+| `4000 0025 0000 3155` | Requires authentication |
+
+<Info>
+  Use any future expiration date, any 3-digit CVC, and any postal code.
+</Info>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Secure API Keys" icon="key">
+    Never expose your secret key. Use environment variables and keep them server-side only.
+  </Card>
+  
+  <Card title="Validate on Server" icon="shield">
+    Always validate prices and plan details server-side to prevent price manipulation.
+  </Card>
+  
+  <Card title="Handle Errors Gracefully" icon="triangle-exclamation">
+    Provide clear error messages to users and log detailed errors for debugging.
+  </Card>
+  
+  <Card title="Implement Rate Limiting" icon="gauge-high">
+    Protect your payment endpoints from abuse with rate limiting.
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [Stripe API Documentation](https://stripe.com/docs/api)
+- [Stripe React Integration](https://stripe.com/docs/stripe-js/react)
+- [Payment Intents Guide](https://stripe.com/docs/payments/payment-intents)
+- [Stripe Testing](https://stripe.com/docs/testing)
+
+## Troubleshooting
+
+### Common Issues
+
+**"No API key provided"**
+- Ensure `STRIPE_SECRET_KEY` is set in your environment variables
+- Verify the key starts with `sk_test_` (test) or `sk_live_` (production)
+
+**"Amount must be at least $0.50"**
+- Stripe requires a minimum charge amount
+- Verify your amount is in the correct format (dollars, not cents)
+
+**"Rate limit exceeded"**
+- The IP has made too many payment attempts
+- Wait 15 minutes or adjust rate limit settings in `src/app/api/stripe/route.ts:14`

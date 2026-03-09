@@ -1,0 +1,370 @@
+---
+title: 'DTOs (Data Transfer Objects)'
+description: 'Application layer data transfer objects for Connect World API contracts'
+---
+
+## Overview
+
+Data Transfer Objects (DTOs) define the input and output contracts for application use cases. They provide a clear boundary between the external API layer and internal domain logic.
+
+## CreateOrderDto
+
+The input DTO for creating a new order. Contains all required information for customer and order creation.
+
+### Interface Definition
+
+```typescript src/application/dtos/OrderDto.ts
+export interface CreateOrderDto {
+  name: string;
+  email: string;
+  phone: string;
+  planId: string;
+  devices: number;
+  months: number;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paymentReceiptId: string;
+}
+```
+
+### Fields
+
+<ParamField path="name" type="string" required>
+  Customer's full name. Must be sanitized and validated before passing to the use case.
+  
+  **Example:** `"Juan Pérez"`
+</ParamField>
+
+<ParamField path="email" type="string" required>
+  Customer's email address. Will be validated by the `Email` value object.
+  
+  **Example:** `"juan.perez@example.com"`
+  
+  **Validation:** Must be a valid email format
+</ParamField>
+
+<ParamField path="phone" type="string" required>
+  Customer's phone number. Will be validated by the `Phone` value object.
+  
+  **Example:** `"+1234567890"`
+  
+  **Validation:** Must be a valid phone format
+</ParamField>
+
+<ParamField path="planId" type="string" required>
+  The unique identifier of the subscription plan being purchased.
+  
+  **Example:** `"plan_basic"`
+  
+  **Validation:** Must match an existing plan in `PLANS` constant
+</ParamField>
+
+<ParamField path="devices" type="number" required>
+  Number of concurrent devices allowed in the subscription.
+  
+  **Example:** `2`
+  
+  **Validation:** Must match the selected plan's device limit (1-10)
+</ParamField>
+
+<ParamField path="months" type="number" required>
+  Duration of the subscription in months.
+  
+  **Example:** `6`
+  
+  **Validation:** Must be one of: `1, 2, 3, 6, 12`
+</ParamField>
+
+<ParamField path="amount" type="number" required>
+  Total payment amount in the currency unit (e.g., dollars).
+  
+  **Example:** `29.99`
+  
+  **Validation:** Must match the expected price for the selected plan and duration
+</ParamField>
+
+<ParamField path="paymentMethod" type="PaymentMethod" required>
+  The payment processor used for this transaction.
+  
+  **Type:** `"stripe" | "paypal"`
+  
+  **Example:** `"stripe"`
+</ParamField>
+
+<ParamField path="paymentReceiptId" type="string" required>
+  The payment processor's transaction or receipt ID for verification.
+  
+  **Example:** `"pi_3JX7g82eZvKYlo2C0123abcd"` (Stripe payment intent ID)
+  
+  **Example:** `"PAYID-M123456-78901234A"` (PayPal transaction ID)
+</ParamField>
+
+### Usage Example
+
+```typescript
+import { CreateOrderDto } from "@/application/dtos/OrderDto";
+
+const orderInput: CreateOrderDto = {
+  name: "María García",
+  email: "maria.garcia@example.com",
+  phone: "+521234567890",
+  planId: "plan_premium",
+  devices: 4,
+  months: 12,
+  amount: 89.99,
+  paymentMethod: "stripe",
+  paymentReceiptId: "pi_3JX7g82eZvKYlo2C0123abcd",
+};
+
+// Pass to use case
+const result = await createOrderUseCase.execute(orderInput);
+```
+
+### Validation in API Routes
+
+```typescript src/app/api/orders/route.ts
+import { sanitizeString, sanitizeEmail, sanitizePhone, sanitizeNumber, sanitizeEnum } from "@/lib/sanitize";
+import { PaymentMethod } from "@/domain/entities/Order";
+
+const PAYMENT_METHODS = ["stripe", "paypal"] as const;
+
+// Sanitize every field before creating DTO
+const name = sanitizeString(body.name, 100);
+const email = sanitizeEmail(body.email);
+const phone = sanitizePhone(body.phone);
+const planId = sanitizeString(body.planId, 50);
+const devices = sanitizeNumber(body.devices, 1, 10);
+const months = sanitizeNumber(body.months, 1, 12);
+const amount = sanitizeNumber(body.amount, 1, 10000);
+const paymentMethod = sanitizeEnum<PaymentMethod>(body.paymentMethod, PAYMENT_METHODS);
+const paymentReceiptId = sanitizeString(body.paymentReceiptId, 200);
+
+// Check all fields are valid
+if (!name || !email || !phone || !planId || devices === null || months === null || amount === null || !paymentMethod || !paymentReceiptId) {
+  return NextResponse.json({ error: "Invalid or incomplete form data." }, { status: 400 });
+}
+
+// Create DTO
+const dto: CreateOrderDto = {
+  name,
+  email,
+  phone,
+  planId,
+  devices,
+  months,
+  amount,
+  paymentMethod,
+  paymentReceiptId,
+};
+```
+
+---
+
+## OrderResponseDto
+
+The output DTO returned after successfully creating an order. Contains the complete order details including generated IDs and calculated dates.
+
+### Interface Definition
+
+```typescript src/application/dtos/OrderDto.ts
+export interface OrderResponseDto {
+  orderId: string;
+  customerId: string;
+  planId: string;
+  devices: number;
+  months: number;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  paymentReceiptId: string;
+  status: string;
+  activationDate: string;
+  expirationDate: string;
+}
+```
+
+### Fields
+
+<ResponseField name="orderId" type="string" required>
+  The unique identifier for the created order.
+  
+  **Example:** `"507f1f77bcf86cd799439011"`
+</ResponseField>
+
+<ResponseField name="customerId" type="string" required>
+  The unique identifier for the created or existing customer.
+  
+  **Example:** `"507f191e810c19729de860ea"`
+</ResponseField>
+
+<ResponseField name="planId" type="string" required>
+  The subscription plan identifier (echoed from input).
+  
+  **Example:** `"plan_basic"`
+</ResponseField>
+
+<ResponseField name="devices" type="number" required>
+  Number of concurrent devices (echoed from input).
+  
+  **Example:** `2`
+</ResponseField>
+
+<ResponseField name="months" type="number" required>
+  Subscription duration in months (echoed from input).
+  
+  **Example:** `6`
+</ResponseField>
+
+<ResponseField name="amount" type="number" required>
+  Total payment amount (echoed from input).
+  
+  **Example:** `29.99`
+</ResponseField>
+
+<ResponseField name="paymentMethod" type="PaymentMethod" required>
+  Payment processor used (echoed from input).
+  
+  **Type:** `"stripe" | "paypal"`
+  
+  **Example:** `"stripe"`
+</ResponseField>
+
+<ResponseField name="paymentReceiptId" type="string" required>
+  Payment processor transaction ID (echoed from input).
+  
+  **Example:** `"pi_3JX7g82eZvKYlo2C0123abcd"`
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  The order status. For successful orders, this is always `"completed"`.
+  
+  **Type:** `"pending" | "completed" | "failed"`
+  
+  **Example:** `"completed"`
+</ResponseField>
+
+<ResponseField name="activationDate" type="string" required>
+  ISO 8601 timestamp when the subscription becomes active. Typically set to the order creation time.
+  
+  **Format:** ISO 8601 string
+  
+  **Example:** `"2024-03-15T10:30:00.000Z"`
+</ResponseField>
+
+<ResponseField name="expirationDate" type="string" required>
+  ISO 8601 timestamp when the subscription expires. Calculated by adding `months` to the activation date.
+  
+  **Format:** ISO 8601 string
+  
+  **Example:** `"2024-09-15T10:30:00.000Z"` (6 months after activation)
+</ResponseField>
+
+### Response Example
+
+```json
+{
+  "orderId": "507f1f77bcf86cd799439011",
+  "customerId": "507f191e810c19729de860ea",
+  "planId": "plan_premium",
+  "devices": 4,
+  "months": 12,
+  "amount": 89.99,
+  "paymentMethod": "stripe",
+  "paymentReceiptId": "pi_3JX7g82eZvKYlo2C0123abcd",
+  "status": "completed",
+  "activationDate": "2024-03-15T10:30:00.000Z",
+  "expirationDate": "2025-03-15T10:30:00.000Z"
+}
+```
+
+### TypeScript Usage
+
+```typescript
+import { OrderResponseDto } from "@/application/dtos/OrderDto";
+
+const response: OrderResponseDto = await createOrderUseCase.execute(orderInput);
+
+console.log(`Order ${response.orderId} created for customer ${response.customerId}`);
+console.log(`Subscription active from ${response.activationDate} to ${response.expirationDate}`);
+
+// Calculate subscription duration in days
+const activation = new Date(response.activationDate);
+const expiration = new Date(response.expirationDate);
+const durationDays = Math.floor((expiration.getTime() - activation.getTime()) / (1000 * 60 * 60 * 24));
+console.log(`Subscription duration: ${durationDays} days`);
+```
+
+### API Route Response
+
+```typescript src/app/api/orders/route.ts
+export async function POST(req: NextRequest) {
+  try {
+    // ... validation and sanitization ...
+
+    const result = await useCase.execute(dto);
+
+    // Return the response DTO with 201 Created status
+    return NextResponse.json(result, { status: 201 });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+```
+
+---
+
+## PaymentMethod Type
+
+The `PaymentMethod` type is defined in the domain layer and used across DTOs.
+
+```typescript src/domain/entities/Order.ts
+export type PaymentMethod = "stripe" | "paypal";
+```
+
+### Supported Payment Methods
+
+<ResponseField name="stripe" type="string">
+  Stripe payment processor integration.
+  
+  **Receipt ID format:** Stripe Payment Intent ID (e.g., `pi_xxx`)
+</ResponseField>
+
+<ResponseField name="paypal" type="string">
+  PayPal payment processor integration.
+  
+  **Receipt ID format:** PayPal Transaction ID (e.g., `PAYID-xxx`)
+</ResponseField>
+
+---
+
+## Best Practices
+
+<Note>
+  **Input Validation**
+  
+  Always sanitize and validate DTO fields before passing them to use cases:
+  - Use sanitization utilities for strings, emails, phones, numbers, and enums
+  - Validate business rules (plan exists, amount matches price, etc.)
+  - Check for honeypot fields to prevent bot submissions
+  - Apply rate limiting to prevent abuse
+</Note>
+
+<Note>
+  **Type Safety**
+  
+  DTOs provide compile-time type safety:
+  - Use TypeScript interfaces to define clear contracts
+  - Export types from a central location (`@/application/dtos`)
+  - Leverage type inference to catch errors early
+  - Use discriminated unions for polymorphic DTOs
+</Note>
+
+<Note>
+  **Separation of Concerns**
+  
+  DTOs serve as the boundary between layers:
+  - **API Layer:** Receives HTTP requests, validates input, creates DTOs
+  - **Application Layer:** Consumes DTOs, orchestrates domain logic, returns DTOs
+  - **Domain Layer:** Works with rich domain entities, not DTOs
+  - **Infrastructure Layer:** Persists domain entities, not DTOs
+</Note>

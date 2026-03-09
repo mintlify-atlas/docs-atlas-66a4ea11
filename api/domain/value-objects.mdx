@@ -1,0 +1,333 @@
+---
+title: 'Value Objects'
+description: 'Domain value objects for validated data types in Connect World'
+---
+
+# Value Objects
+
+Value objects are immutable objects that represent validated domain concepts. They encapsulate validation logic and ensure data integrity throughout the application.
+
+## Email
+
+Represents a validated email address.
+
+### Class Definition
+
+```typescript src/domain/value-objects/Email.ts
+export class Email {
+  private readonly value: string;
+
+  constructor(email: string) {
+    if (!this.isValid(email)) {
+      throw new Error(`Invalid email: ${email}`);
+    }
+    this.value = email.toLowerCase().trim();
+  }
+
+  private isValid(email: string): boolean {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  }
+
+  toString(): string {
+    return this.value;
+  }
+}
+```
+
+### Constructor
+
+<ResponseField name="email" type="string" required>
+  Raw email address to validate and normalize
+</ResponseField>
+
+**Behavior:**
+- Validates the email format using regex pattern
+- Throws an error if the email is invalid
+- Normalizes the email by converting to lowercase and trimming whitespace
+- Stores the normalized value immutably
+
+### Methods
+
+<Accordion title="toString()">
+```typescript
+toString(): string
+```
+
+Returns the normalized email address as a string.
+
+**Returns:** The validated and normalized email address (lowercase, trimmed)
+
+**Example:**
+```typescript
+const email = new Email('  John@Example.COM  ');
+console.log(email.toString()); // "john@example.com"
+```
+</Accordion>
+
+### Validation Rules
+
+The email must match the following regex pattern:
+
+```regex
+/^[^\s@]+@[^\s@]+\.[^\s@]+$/
+```
+
+<Expandable title="Pattern Breakdown">
+- `^[^\s@]+` - Starts with one or more characters that are not whitespace or @
+- `@` - Contains exactly one @ symbol
+- `[^\s@]+` - Followed by one or more characters that are not whitespace or @
+- `\.` - Contains a period (dot)
+- `[^\s@]+$` - Ends with one or more characters that are not whitespace or @
+</Expandable>
+
+### Usage Examples
+
+<Tabs>
+  <Tab title="Valid Email">
+    ```typescript
+    import { Email } from '@/domain/value-objects/Email';
+
+    try {
+      const email = new Email('user@example.com');
+      console.log(email.toString()); // "user@example.com"
+      
+      // Email is normalized
+      const email2 = new Email('  USER@EXAMPLE.COM  ');
+      console.log(email2.toString()); // "user@example.com"
+    } catch (error) {
+      console.error(error.message);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Invalid Email">
+    ```typescript
+    import { Email } from '@/domain/value-objects/Email';
+
+    try {
+      const email = new Email('invalid-email');
+    } catch (error) {
+      console.error(error.message);
+      // Error: Invalid email: invalid-email
+    }
+
+    try {
+      const email = new Email('user@domain');
+    } catch (error) {
+      console.error(error.message);
+      // Error: Invalid email: user@domain
+    }
+    ```
+  </Tab>
+  
+  <Tab title="In Use Case">
+    ```typescript
+    import { Email } from '@/domain/value-objects/Email';
+    import { createCustomer } from '@/domain/entities/Customer';
+
+    // From CreateOrderUseCase
+    async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+      const email = new Email(dto.email); // Validates email
+      
+      const customerData = createCustomer({
+        name: dto.name,
+        email: email.toString(), // Use normalized value
+        phone: phone.toString(),
+      });
+      
+      const customer = await this.customerRepo.create(customerData);
+      // ...
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Phone
+
+Represents a validated phone number.
+
+### Class Definition
+
+```typescript src/domain/value-objects/Phone.ts
+export class Phone {
+  private readonly value: string;
+
+  constructor(phone: string) {
+    const cleaned = phone.replace(/\D/g, "");
+    if (!this.isValid(cleaned)) {
+      throw new Error(`Invalid phone: ${phone}`);
+    }
+    this.value = cleaned;
+  }
+
+  private isValid(phone: string): boolean {
+    return phone.length >= 10 && phone.length <= 15;
+  }
+
+  toString(): string {
+    return this.value;
+  }
+}
+```
+
+### Constructor
+
+<ResponseField name="phone" type="string" required>
+  Raw phone number to validate and normalize
+</ResponseField>
+
+**Behavior:**
+- Removes all non-digit characters (spaces, dashes, parentheses, etc.)
+- Validates that the cleaned number has between 10-15 digits
+- Throws an error if the phone number is invalid
+- Stores the cleaned value immutably
+
+### Methods
+
+<Accordion title="toString()">
+```typescript
+toString(): string
+```
+
+Returns the normalized phone number as a string.
+
+**Returns:** The validated phone number containing only digits
+
+**Example:**
+```typescript
+const phone = new Phone('+1 (555) 123-4567');
+console.log(phone.toString()); // "15551234567"
+```
+</Accordion>
+
+### Validation Rules
+
+The phone number must meet the following criteria after removing non-digits:
+
+<ResponseField name="length" type="number" required>
+  Must be between 10 and 15 digits (inclusive)
+</ResponseField>
+
+**Valid Examples:**
+- 10 digits: `"1234567890"`
+- 11 digits: `"12345678901"` (e.g., with country code)
+- 15 digits: `"123456789012345"`
+
+**Invalid Examples:**
+- Too short: `"123456789"` (9 digits)
+- Too long: `"1234567890123456"` (16 digits)
+
+### Usage Examples
+
+<Tabs>
+  <Tab title="Valid Phone">
+    ```typescript
+    import { Phone } from '@/domain/value-objects/Phone';
+
+    try {
+      // Various formats are accepted
+      const phone1 = new Phone('+1 (555) 123-4567');
+      console.log(phone1.toString()); // "15551234567"
+      
+      const phone2 = new Phone('555-123-4567');
+      console.log(phone2.toString()); // "5551234567"
+      
+      const phone3 = new Phone('5551234567');
+      console.log(phone3.toString()); // "5551234567"
+    } catch (error) {
+      console.error(error.message);
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Invalid Phone">
+    ```typescript
+    import { Phone } from '@/domain/value-objects/Phone';
+
+    try {
+      const phone = new Phone('123'); // Too short
+    } catch (error) {
+      console.error(error.message);
+      // Error: Invalid phone: 123
+    }
+
+    try {
+      const phone = new Phone('12345678901234567890'); // Too long
+    } catch (error) {
+      console.error(error.message);
+      // Error: Invalid phone: 12345678901234567890
+    }
+    ```
+  </Tab>
+  
+  <Tab title="In Use Case">
+    ```typescript
+    import { Phone } from '@/domain/value-objects/Phone';
+    import { createCustomer } from '@/domain/entities/Customer';
+
+    // From CreateOrderUseCase
+    async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+      const phone = new Phone(dto.phone); // Validates and cleans phone
+      
+      const customerData = createCustomer({
+        name: dto.name,
+        email: email.toString(),
+        phone: phone.toString(), // Use cleaned value
+      });
+      
+      const customer = await this.customerRepo.create(customerData);
+      // ...
+    }
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Value Object Characteristics
+
+<Accordion title="Immutability">
+Value objects are immutable. Once created, their internal state cannot be changed. This ensures data integrity and prevents unexpected side effects.
+
+```typescript
+const email = new Email('user@example.com');
+// email.value is private and readonly
+// No methods exist to modify the internal value
+```
+</Accordion>
+
+<Accordion title="Validation">
+Value objects validate their input in the constructor and throw errors for invalid data. This ensures that invalid objects cannot exist in the system.
+
+```typescript
+try {
+  const email = new Email('invalid');
+} catch (error) {
+  // Handle validation error
+  console.error('Email validation failed');
+}
+```
+</Accordion>
+
+<Accordion title="Normalization">
+Value objects normalize their input to a canonical form. This ensures consistency throughout the application.
+
+```typescript
+const email1 = new Email('USER@EXAMPLE.COM');
+const email2 = new Email('user@example.com');
+console.log(email1.toString() === email2.toString()); // true
+```
+</Accordion>
+
+<Accordion title="Encapsulation">
+Validation logic is encapsulated within the value object, keeping domain rules close to the data they govern.
+
+```typescript
+// Validation logic is hidden in private methods
+// Business logic doesn't need to know HOW validation works
+const email = new Email(userInput);
+const phone = new Phone(userInput);
+```
+</Accordion>

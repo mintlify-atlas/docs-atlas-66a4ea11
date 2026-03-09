@@ -1,0 +1,569 @@
+---
+title: 'PayPal API'
+description: 'Create and capture PayPal orders for Connect World subscriptions'
+icon: 'paypal'
+---
+
+## Overview
+
+The PayPal API provides two endpoints for processing payments:
+
+1. **Create Order** - Initialize a PayPal order
+2. **Capture Order** - Capture payment after customer approval
+
+<Note>
+  PayPal payments require a two-step process: first create an order, then capture it after the customer approves the payment through PayPal's interface.
+</Note>
+
+---
+
+## POST /api/paypal/create-order
+
+Create a new PayPal order for processing subscription payments. This endpoint validates the plan and pricing, then returns a PayPal order ID for customer approval.
+
+### Rate Limiting
+
+- **Limit:** 10 requests per IP
+- **Window:** 15 minutes
+- **Purpose:** Prevent order creation spam
+
+### Security Features
+
+- Server-side price validation (prevents tampering)
+- Plan and duration validation
+- Input sanitization
+- PayPal OAuth authentication
+
+### Request Body
+
+<ParamField path="planId" type="string" required>
+  Plan identifier (max 50 characters)
+  
+  Must be one of: `plan-1` (Basic), `plan-2` (Standard), `plan-3` (Premium)
+  
+  Example: `"plan-2"`
+</ParamField>
+
+<ParamField path="months" type="number" required>
+  Subscription duration in months (1-12 range)
+  
+  Must be one of: `1`, `2`, `3`, `6`, or `12`
+  
+  Example: `6`
+</ParamField>
+
+<ParamField path="amount" type="number" required>
+  Payment amount in USD (1-10000 range)
+  
+  Must exactly match the plan's price for the selected duration. The server validates this to prevent price manipulation (tolerance: 0.01).
+  
+  Example: `70`
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  PayPal order ID
+  
+  Use this ID to:
+  1. Redirect customer to PayPal for approval
+  2. Capture the payment after approval
+  
+  Example: `"7XX12345XX123456X"`
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/paypal/create-order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "planId": "plan-2",
+    "months": 6,
+    "amount": 70
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://your-domain.com/api/paypal/create-order', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    planId: 'plan-2',
+    months: 6,
+    amount: 70,
+  }),
+});
+
+const { id } = await response.json();
+console.log('PayPal Order ID:', id);
+
+// Redirect user to PayPal
+window.location.href = `https://www.paypal.com/checkoutnow?token=${id}`;
+```
+
+```python Python
+import requests
+import json
+
+response = requests.post(
+    'https://your-domain.com/api/paypal/create-order',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({
+        'planId': 'plan-2',
+        'months': 6,
+        'amount': 70
+    })
+)
+
+data = response.json()
+order_id = data['id']
+print(f"PayPal Order ID: {order_id}")
+```
+
+```typescript TypeScript
+interface CreateOrderRequest {
+  planId: string;
+  months: number;
+  amount: number;
+}
+
+interface CreateOrderResponse {
+  id: string;
+}
+
+const createPayPalOrder = async (
+  planId: string,
+  months: number,
+  amount: number
+): Promise<string> => {
+  const response = await fetch('https://your-domain.com/api/paypal/create-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId, months, amount }),
+  });
+  
+  const data: CreateOrderResponse = await response.json();
+  return data.id;
+};
+```
+</CodeGroup>
+
+### Example Response
+
+```json 200 OK
+{
+  "id": "7XX12345XX123456X"
+}
+```
+
+### Error Responses
+
+<Expandable title="400 Bad Request - Invalid Data">
+```json
+{
+  "error": "Datos inválidos."
+}
+```
+
+Returned when required fields are missing or invalid.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Plan">
+```json
+{
+  "error": "Plan inválido."
+}
+```
+
+Returned when `planId` doesn't exist in the system.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Duration">
+```json
+{
+  "error": "Duración inválida."
+}
+```
+
+Returned when `months` is not a valid duration (1, 2, 3, 6, or 12).
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Amount">
+```json
+{
+  "error": "Monto inválido."
+}
+```
+
+Returned when amount doesn't match the plan's price.
+</Expandable>
+
+<Expandable title="429 Too Many Requests">
+```json
+{
+  "error": "Demasiadas solicitudes. Intenta de nuevo en unos minutos."
+}
+```
+
+Returned when rate limit (10 per 15 minutes) is exceeded.
+</Expandable>
+
+<Expandable title="500 Internal Server Error">
+```json
+{
+  "error": "{PayPal error details}"
+}
+```
+
+Returned when PayPal API fails. The error includes PayPal's response details.
+</Expandable>
+
+---
+
+## POST /api/paypal/capture-order
+
+Capture a PayPal order after the customer has approved the payment. This finalizes the transaction and charges the customer.
+
+<Warning>
+  Only call this endpoint after the customer has approved the payment through PayPal's interface. The order must be in `APPROVED` status.
+</Warning>
+
+### Rate Limiting
+
+- **No rate limit** - Captures are expected to follow creations
+
+### Request Body
+
+<ParamField path="orderId" type="string" required>
+  PayPal order ID to capture
+  
+  This is the ID returned from `/api/paypal/create-order`
+  
+  Example: `"7XX12345XX123456X"`
+</ParamField>
+
+### Response
+
+<ResponseField name="id" type="string">
+  Captured order ID (same as input)
+</ResponseField>
+
+<ResponseField name="status" type="string">
+  Order status after capture
+  
+  Typically: `"COMPLETED"`
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/paypal/capture-order \
+  -H "Content-Type: application/json" \
+  -d '{
+    "orderId": "7XX12345XX123456X"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://your-domain.com/api/paypal/capture-order', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    orderId: '7XX12345XX123456X',
+  }),
+});
+
+const { id, status } = await response.json();
+console.log(`Order ${id} status: ${status}`);
+
+// Now create the subscription order
+await fetch('/api/orders', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: 'Customer Name',
+    email: 'customer@example.com',
+    phone: '+1234567890',
+    planId: 'plan-2',
+    devices: 2,
+    months: 6,
+    amount: 70,
+    paymentMethod: 'paypal',
+    paymentReceiptId: id, // Use captured order ID
+  }),
+});
+```
+
+```python Python
+import requests
+import json
+
+response = requests.post(
+    'https://your-domain.com/api/paypal/capture-order',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({
+        'orderId': '7XX12345XX123456X'
+    })
+)
+
+data = response.json()
+print(f"Captured Order: {data['id']}, Status: {data['status']}")
+```
+
+```typescript TypeScript
+interface CaptureOrderRequest {
+  orderId: string;
+}
+
+interface CaptureOrderResponse {
+  id: string;
+  status: string;
+}
+
+const capturePayPalOrder = async (
+  orderId: string
+): Promise<CaptureOrderResponse> => {
+  const response = await fetch('https://your-domain.com/api/paypal/capture-order', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ orderId }),
+  });
+  
+  return await response.json();
+};
+```
+</CodeGroup>
+
+### Example Response
+
+```json 200 OK
+{
+  "id": "7XX12345XX123456X",
+  "status": "COMPLETED"
+}
+```
+
+### Error Responses
+
+<Expandable title="500 Internal Server Error - PayPal Error">
+```json
+{
+  "error": "{PayPal error details}"
+}
+```
+
+Returned when:
+- Order ID is invalid
+- Order is not in APPROVED status
+- Order has already been captured
+- PayPal API fails
+
+The error includes PayPal's detailed response.
+</Expandable>
+
+---
+
+## PayPal Order Structure
+
+The order created by `/api/paypal/create-order` has the following structure:
+
+```json
+{
+  "intent": "CAPTURE",
+  "purchase_units": [
+    {
+      "amount": {
+        "currency_code": "USD",
+        "value": "70.00"
+      },
+      "description": "Connect World Plan plan-2 6mo"
+    }
+  ]
+}
+```
+
+<ResponseField name="intent" type="string">
+  Always set to `"CAPTURE"` for immediate payment capture
+</ResponseField>
+
+<ResponseField name="purchase_units" type="array">
+  Array containing payment details
+  
+  - `amount.currency_code`: Always `"USD"`
+  - `amount.value`: Formatted price (e.g., `"70.00"`)
+  - `description`: Human-readable description with plan and duration
+</ResponseField>
+
+## Authentication
+
+Both endpoints use PayPal OAuth for authentication:
+
+```typescript
+// Authentication flow (from create-order/route.ts:10-27)
+async function getPayPalAccessToken(): Promise<string> {
+  const credentials = Buffer.from(
+    `${process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+  ).toString('base64');
+
+  const { data } = await axios.post(
+    `${PAYPAL_BASE}/v1/oauth2/token`,
+    'grant_type=client_credentials',
+    {
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    }
+  );
+
+  return data.access_token;
+}
+```
+
+## Implementation Details
+
+<Note>
+  **Create Order:** Implemented in `/src/app/api/paypal/create-order/route.ts:29`
+  
+  **Capture Order:** Implemented in `/src/app/api/paypal/capture-order/route.ts:25`
+  
+  Both endpoints use:
+  - **HTTP Client:** `axios`
+  - **Base URL:** `PAYPAL_BASE_URL` (sandbox or production)
+  - **Authentication:** OAuth 2.0 with client credentials
+  - **Security:** Rate limiting (create only), input sanitization, price validation
+</Note>
+
+## Complete Payment Flow
+
+1. **Client:** Call `/api/paypal/create-order` with plan details
+2. **Server:** Validate plan, months, and amount
+3. **Server:** Authenticate with PayPal OAuth
+4. **Server:** Create PayPal order
+5. **Server:** Return order ID
+6. **Client:** Redirect user to PayPal approval URL
+7. **Customer:** Approve payment on PayPal
+8. **PayPal:** Redirect back to your site with order ID
+9. **Client:** Call `/api/paypal/capture-order` with order ID
+10. **Server:** Capture the payment
+11. **Server:** Return captured order status
+12. **Client:** Call `/api/orders` with captured order ID as `paymentReceiptId`
+13. **Server:** Create subscription order
+14. **Client:** Show success confirmation
+
+## Example: Full Integration
+
+<CodeGroup>
+```javascript React + PayPal SDK
+import { PayPalButtons } from '@paypal/react-paypal-js';
+
+function PayPalCheckout({ planId, months, amount, customerData }) {
+  const createOrder = async () => {
+    // Step 1: Create PayPal order
+    const response = await fetch('/api/paypal/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, months, amount }),
+    });
+    const { id } = await response.json();
+    return id;
+  };
+
+  const onApprove = async (data) => {
+    // Step 2: Capture the payment
+    const captureResponse = await fetch('/api/paypal/capture-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderId: data.orderID }),
+    });
+    const { id, status } = await captureResponse.json();
+
+    if (status === 'COMPLETED') {
+      // Step 3: Create subscription order
+      await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...customerData,
+          planId,
+          months,
+          amount,
+          paymentMethod: 'paypal',
+          paymentReceiptId: id,
+        }),
+      });
+
+      alert('Subscription created successfully!');
+    }
+  };
+
+  return (
+    <PayPalButtons
+      createOrder={createOrder}
+      onApprove={onApprove}
+      style={{ layout: 'vertical' }}
+    />
+  );
+}
+```
+</CodeGroup>
+
+## Testing
+
+<Warning>
+  For testing, use PayPal sandbox environment:
+  - Set `PAYPAL_BASE_URL` to `https://api-m.sandbox.paypal.com`
+  - Use sandbox client ID and secret
+  - Create test buyer accounts in PayPal Developer Dashboard
+  - Test cards: Use PayPal's test credit cards
+</Warning>
+
+### Test Scenarios
+
+| Scenario | Expected Result |
+|----------|----------------|
+| Valid plan and price | Returns order ID |
+| Invalid plan ID | 400 error: "Plan inválido." |
+| Wrong amount | 400 error: "Monto inválido." |
+| Invalid duration | 400 error: "Duración inválida." |
+| Capture unapproved order | 500 error with PayPal details |
+| Capture twice | 500 error: already captured |
+
+## Environment Variables
+
+Required environment variables:
+
+```bash
+# PayPal Credentials
+NEXT_PUBLIC_PAYPAL_CLIENT_ID=...
+PAYPAL_CLIENT_SECRET=...
+
+# Base URL (sandbox or production)
+PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
+```
+
+## PayPal Response Logging
+
+The create-order endpoint logs PayPal responses:
+
+```typescript
+// From create-order/route.ts:75-88
+console.log('[PayPal create-order] payload:', JSON.stringify(orderPayload));
+console.log('[PayPal create-order] created:', data.id, 'status:', data.status);
+```
+
+Check server logs for debugging PayPal integration issues.
+
+## See Also
+
+- [Orders API](/api/orders) - Create orders after payment capture
+- [Stripe API](/api/stripe) - Alternative payment method
+- [API Overview](/api/overview) - General API information
+- [PayPal Orders API](https://developer.paypal.com/docs/api/orders/v2/) - Official PayPal documentation

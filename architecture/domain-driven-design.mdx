@@ -1,0 +1,788 @@
+---
+title: 'Domain-Driven Design'
+description: 'Understanding the DDD architecture and layers in Connect World'
+icon: 'gem'
+---
+
+<Note>
+  Connect World implements **Domain-Driven Design (DDD)** to keep business logic clean, testable, and independent from frameworks and infrastructure.
+</Note>
+
+## DDD Architecture Overview
+
+Domain-Driven Design organizes code into four distinct layers, each with specific responsibilities:
+
+```plaintext
+┌─────────────────────────────────────┐
+│      Presentation Layer             │  ← UI Components & API Routes
+│  (src/presentation/ + src/app/)     │
+└────────────┬────────────────────────┘
+             │
+┌────────────▼────────────────────────┐
+│      Application Layer              │  ← Use Cases & DTOs
+│      (src/application/)             │
+└────────────┬────────────────────────┘
+             │
+┌────────────▼────────────────────────┐
+│      Domain Layer                   │  ← Entities, Value Objects, Interfaces
+│      (src/domain/)                  │  ← NO DEPENDENCIES
+└────────────▲────────────────────────┘
+             │
+┌────────────┴────────────────────────┐
+│      Infrastructure Layer           │  ← Database, External APIs
+│      (src/infrastructure/)          │
+└─────────────────────────────────────┘
+```
+
+## Domain Layer
+
+The **Domain Layer** is the heart of the application, containing pure business logic with zero dependencies on frameworks or infrastructure.
+
+### Entities
+
+Entities represent core business concepts with identity:
+
+<Accordion title="Customer Entity" icon="user">
+  **Location**: `src/domain/entities/Customer.ts`
+
+  ```typescript
+  export interface Customer {
+    id?: string;
+    email: string;
+    phone: string;
+    name: string;
+    createdAt?: Date;
+  }
+
+  export function createCustomer(data: Omit<Customer, "id" | "createdAt">): Customer {
+    return {
+      ...data,
+      createdAt: new Date(),
+    };
+  }
+  ```
+
+  **Key Points**:
+  - Plain TypeScript interface (no Mongoose, no database concerns)
+  - Factory function ensures consistent creation
+  - Optional `id` and `createdAt` (set by infrastructure layer)
+</Accordion>
+
+<Accordion title="Order Entity" icon="shopping-cart">
+  **Location**: `src/domain/entities/Order.ts`
+
+  ```typescript
+  export type PaymentMethod = "stripe" | "paypal";
+  export type OrderStatus = "pending" | "completed" | "failed";
+
+  export interface Order {
+    id?: string;
+    customerId: string;
+    planId: string;
+    devices: number;
+    months: number;
+    amount: number;
+    paymentMethod: PaymentMethod;
+    paymentReceiptId: string;
+    status: OrderStatus;
+    activationDate: Date;
+    expirationDate: Date;
+    createdAt?: Date;
+  }
+
+  export function createOrder(
+    data: Omit<Order, "id" | "createdAt" | "activationDate" | "expirationDate">
+  ): Order {
+    const activationDate = new Date();
+    const expirationDate = new Date();
+    expirationDate.setMonth(expirationDate.getMonth() + data.months);
+
+    return {
+      ...data,
+      activationDate,
+      expirationDate,
+      createdAt: new Date(),
+    };
+  }
+  ```
+
+  **Business Rules**:
+  - Activation date is set to current time
+  - Expiration date calculated from months duration
+  - Payment method and status are type-safe enums
+</Accordion>
+
+<Accordion title="Plan Entity" icon="list">
+  **Location**: `src/domain/entities/Plan.ts`
+
+  ```typescript
+  export type DeviceCount = 1 | 2 | 3;
+  export type PlanDuration = 1 | 2 | 3 | 6 | 12;
+
+  export interface PlanPrice {
+    months: PlanDuration;
+    price: number;
+    label: string;
+  }
+
+  export interface Plan {
+    id: string;
+    devices: DeviceCount;
+    name: string;
+    description: string;
+    prices: PlanPrice[];
+    features: string[];
+    popular?: boolean;
+  }
+
+  const PLAN_PRICES: Record<DeviceCount, Record<PlanDuration, number>> = {
+    1: { 1: 10, 2: 20, 3: 30, 6: 60, 12: 120 },
+    2: { 1: 15, 2: 25, 3: 35, 6: 70, 12: 140 },
+    3: { 1: 15, 2: 30, 3: 45, 6: 80, 12: 149 },
+  };
+
+  export function createPlan(devices: DeviceCount): Plan {
+    const prices: PlanPrice[] = ([1, 2, 3, 6, 12] as PlanDuration[]).map(
+      (months) => ({
+        months,
+        price: PLAN_PRICES[devices][months],
+        label: months === 1 ? "1 mes" : `${months} meses`,
+      })
+    );
+
+    return {
+      id: `plan-${devices}`,
+      devices,
+      name: devices === 1 ? "Basic" : devices === 2 ? "Standard" : "Premium",
+      description: `Disfruta Connect World en ${devices} dispositivo${devices > 1 ? "s" : ""}`,
+      prices,
+      features: getFeatures(devices),
+      popular: devices === 2,
+    };
+  }
+
+  export const PLANS: Plan[] = [createPlan(1), createPlan(2), createPlan(3)];
+  ```
+
+  **Business Logic**:
+  - Centralized pricing matrix
+  - Factory function generates all plan variations
+  - Type-safe device counts and durations
+</Accordion>
+
+### Value Objects
+
+Value objects encapsulate validation logic and have no identity:
+
+<CardGroup cols={2}>
+  <Card title="Email Value Object" icon="envelope">
+    **Location**: `src/domain/value-objects/Email.ts`
+
+    ```typescript
+    export class Email {
+      private readonly value: string;
+
+      constructor(email: string) {
+        if (!this.isValid(email)) {
+          throw new Error(`Invalid email: ${email}`);
+        }
+        this.value = email.toLowerCase().trim();
+      }
+
+      private isValid(email: string): boolean {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      }
+
+      toString(): string {
+        return this.value;
+      }
+    }
+    ```
+
+    **Benefits**:
+    - Validation at construction time
+    - Immutable once created
+    - Automatic normalization (lowercase, trim)
+  </Card>
+
+  <Card title="Phone Value Object" icon="phone">
+    **Location**: `src/domain/value-objects/Phone.ts`
+
+    ```typescript
+    export class Phone {
+      private readonly value: string;
+
+      constructor(phone: string) {
+        const cleaned = phone.replace(/\D/g, "");
+        if (cleaned.length < 10 || cleaned.length > 15) {
+          throw new Error(`Invalid phone: ${phone}`);
+        }
+        this.value = cleaned;
+      }
+
+      toString(): string {
+        return this.value;
+      }
+    }
+    ```
+
+    **Validation**:
+    - Strips non-digit characters
+    - Enforces length constraints
+    - Throws on invalid input
+  </Card>
+</CardGroup>
+
+### Repository Interfaces
+
+Repositories define data access contracts without implementation details:
+
+<CodeGroup>
+```typescript src/domain/repositories/IOrderRepository.ts
+export interface IOrderRepository {
+  create(order: Order): Promise<Order>;
+  findByCustomerId(customerId: string): Promise<Order[]>;
+  findByReceiptId(receiptId: string): Promise<Order | null>;
+}
+```
+
+```typescript src/domain/repositories/ICustomerRepository.ts
+export interface ICustomerRepository {
+  create(customer: Customer): Promise<Customer>;
+  findByEmail(email: string): Promise<Customer | null>;
+  findById(id: string): Promise<Customer | null>;
+}
+```
+</CodeGroup>
+
+**Key Principle**: The domain layer defines *what* operations are needed, not *how* they're implemented.
+
+## Application Layer
+
+The **Application Layer** orchestrates business workflows by coordinating domain entities and repositories.
+
+### Use Cases
+
+<Accordion title="CreateOrderUseCase" icon="cart-plus">
+  **Location**: `src/application/use-cases/CreateOrderUseCase.ts`
+
+  ```typescript
+  import { createCustomer } from "@/domain/entities/Customer";
+  import { createOrder } from "@/domain/entities/Order";
+  import { ICustomerRepository } from "@/domain/repositories/ICustomerRepository";
+  import { IOrderRepository } from "@/domain/repositories/IOrderRepository";
+  import { Email } from "@/domain/value-objects/Email";
+  import { Phone } from "@/domain/value-objects/Phone";
+  import { CreateOrderDto, OrderResponseDto } from "@/application/dtos/OrderDto";
+
+  export class CreateOrderUseCase {
+    constructor(
+      private readonly customerRepo: ICustomerRepository,
+      private readonly orderRepo: IOrderRepository
+    ) {}
+
+    async execute(dto: CreateOrderDto): Promise<OrderResponseDto> {
+      // Validate value objects
+      const email = new Email(dto.email);
+      const phone = new Phone(dto.phone);
+
+      // Create customer entity
+      const customerData = createCustomer({
+        name: dto.name,
+        email: email.toString(),
+        phone: phone.toString(),
+      });
+
+      // Persist customer
+      const customer = await this.customerRepo.create(customerData);
+
+      // Create order entity
+      const orderData = createOrder({
+        customerId: customer.id!,
+        planId: dto.planId,
+        devices: dto.devices,
+        months: dto.months,
+        amount: dto.amount,
+        paymentMethod: dto.paymentMethod,
+        paymentReceiptId: dto.paymentReceiptId,
+        status: "completed",
+      });
+
+      // Persist order
+      const order = await this.orderRepo.create(orderData);
+
+      // Return DTO
+      return {
+        orderId: order.id!,
+        customerId: customer.id!,
+        planId: order.planId,
+        devices: order.devices,
+        months: order.months,
+        amount: order.amount,
+        paymentMethod: order.paymentMethod,
+        paymentReceiptId: order.paymentReceiptId,
+        status: order.status,
+        activationDate: order.activationDate.toISOString(),
+        expirationDate: order.expirationDate.toISOString(),
+      };
+    }
+  }
+  ```
+
+  **Responsibilities**:
+  1. Validate input using value objects
+  2. Create domain entities
+  3. Coordinate repository operations
+  4. Transform output to DTO
+
+  **Note**: Use case has NO knowledge of MongoDB, HTTP, or Next.js
+</Accordion>
+
+### Data Transfer Objects (DTOs)
+
+<Accordion title="OrderDto" icon="file-code">
+  **Location**: `src/application/dtos/OrderDto.ts`
+
+  ```typescript
+  export interface CreateOrderDto {
+    name: string;
+    email: string;
+    phone: string;
+    planId: string;
+    devices: number;
+    months: number;
+    amount: number;
+    paymentMethod: "stripe" | "paypal";
+    paymentReceiptId: string;
+  }
+
+  export interface OrderResponseDto {
+    orderId: string;
+    customerId: string;
+    planId: string;
+    devices: number;
+    months: number;
+    amount: number;
+    paymentMethod: string;
+    paymentReceiptId: string;
+    status: string;
+    activationDate: string;  // ISO string
+    expirationDate: string;  // ISO string
+  }
+  ```
+
+  **Purpose**:
+  - Define API contracts
+  - Decouple external API from internal entities
+  - Facilitate serialization (Date → ISO string)
+</Accordion>
+
+## Infrastructure Layer
+
+The **Infrastructure Layer** implements technical details like database access and external APIs.
+
+### Repository Implementations
+
+<Accordion title="MongoOrderRepository" icon="database">
+  **Location**: `src/infrastructure/repositories/MongoOrderRepository.ts`
+
+  ```typescript
+  import { Order, PaymentMethod, OrderStatus } from "@/domain/entities/Order";
+  import { IOrderRepository } from "@/domain/repositories/IOrderRepository";
+  import { connectDB } from "@/infrastructure/database/connection";
+  import { OrderModel, OrderDbDoc } from "@/infrastructure/database/models/OrderModel";
+
+  // Map domain entity (camelCase) → DB document (snake_case)
+  function orderToDb(order: Order): Record<string, unknown> {
+    return {
+      customer_id: order.customerId,
+      plan_id: order.planId,
+      devices: order.devices,
+      months: order.months,
+      amount: order.amount,
+      payment_method: order.paymentMethod,
+      payment_receipt_id: order.paymentReceiptId,
+      status: order.status,
+      activation_date: order.activationDate,
+      expiration_date: order.expirationDate,
+    };
+  }
+
+  // Map DB document (snake_case) → domain entity (camelCase)
+  function docToOrder(doc: OrderDbDoc): Order {
+    return {
+      id: doc._id.toString(),
+      customerId: doc.customer_id,
+      planId: doc.plan_id,
+      devices: doc.devices,
+      months: doc.months,
+      amount: doc.amount,
+      paymentMethod: doc.payment_method as PaymentMethod,
+      paymentReceiptId: doc.payment_receipt_id,
+      status: doc.status as OrderStatus,
+      activationDate: doc.activation_date,
+      expirationDate: doc.expiration_date,
+    };
+  }
+
+  export class MongoOrderRepository implements IOrderRepository {
+    async create(order: Order): Promise<Order> {
+      await connectDB();
+      const payload = orderToDb(order);
+      const doc = await OrderModel.create(payload);
+      return docToOrder(doc);
+    }
+
+    async findByCustomerId(customerId: string): Promise<Order[]> {
+      await connectDB();
+      const docs = await OrderModel.find({ customer_id: customerId }).sort({ created_at: -1 });
+      return docs.map(docToOrder);
+    }
+
+    async findByReceiptId(receiptId: string): Promise<Order | null> {
+      await connectDB();
+      const doc = await OrderModel.findOne({ payment_receipt_id: receiptId });
+      return doc ? docToOrder(doc) : null;
+    }
+  }
+  ```
+
+  **Key Features**:
+  - Implements `IOrderRepository` interface
+  - Converts between camelCase (domain) and snake_case (database)
+  - Handles MongoDB connection
+  - Uses Mongoose models internally
+</Accordion>
+
+<Accordion title="MongoCustomerRepository" icon="database">
+  **Location**: `src/infrastructure/repositories/MongoCustomerRepository.ts`
+
+  Similar pattern to `MongoOrderRepository`:
+  - Implements `ICustomerRepository`
+  - Maps customer entities to/from database documents
+  - Handles queries and persistence
+</Accordion>
+
+### Database Models
+
+<Accordion title="OrderModel (Mongoose Schema)" icon="file-code">
+  **Location**: `src/infrastructure/database/models/OrderModel.ts`
+
+  ```typescript
+  import mongoose, { Schema, Model } from "mongoose";
+
+  export interface OrderDbDoc {
+    _id: mongoose.Types.ObjectId;
+    customer_id: string;
+    plan_id: string;
+    devices: number;
+    months: number;
+    amount: number;
+    payment_method: string;
+    payment_receipt_id: string;
+    status: string;
+    activation_date: Date;
+    expiration_date: Date;
+    created_at: Date;
+  }
+
+  const orderSchema = new Schema<OrderDbDoc>({
+    customer_id: { type: String, required: true },
+    plan_id: { type: String, required: true },
+    devices: { type: Number, required: true },
+    months: { type: Number, required: true },
+    amount: { type: Number, required: true },
+    payment_method: { type: String, required: true },
+    payment_receipt_id: { type: String, required: true, unique: true },
+    status: { type: String, required: true },
+    activation_date: { type: Date, required: true },
+    expiration_date: { type: Date, required: true },
+    created_at: { type: Date, default: Date.now },
+  });
+
+  export const OrderModel: Model<OrderDbDoc> =
+    mongoose.models.Order || mongoose.model<OrderDbDoc>("Order", orderSchema);
+  ```
+
+  **Database Conventions**:
+  - snake_case field names (MongoDB standard)
+  - Timestamps with `created_at`
+  - Unique constraint on `payment_receipt_id`
+</Accordion>
+
+### Database Connection
+
+<Accordion title="MongoDB Connection" icon="plug">
+  **Location**: `src/infrastructure/database/connection.ts`
+
+  ```typescript
+  import mongoose from "mongoose";
+
+  const MONGODB_URI = process.env.MONGODB_URI as string;
+
+  interface MongooseCache {
+    conn: typeof mongoose | null;
+    promise: Promise<typeof mongoose> | null;
+  }
+
+  declare global {
+    var mongoose: MongooseCache | undefined;
+  }
+
+  const cached: MongooseCache = global.mongoose ?? { conn: null, promise: null };
+  global.mongoose = cached;
+
+  export async function connectDB(): Promise<typeof mongoose> {
+    if (cached.conn) return cached.conn;
+
+    if (!cached.promise) {
+      cached.promise = mongoose.connect(MONGODB_URI, {
+        bufferCommands: false,
+      });
+    }
+
+    cached.conn = await cached.promise;
+    return cached.conn;
+  }
+  ```
+
+  **Serverless Optimization**:
+  - Connection cached globally
+  - Reuses existing connections across function invocations
+  - Prevents connection exhaustion
+</Accordion>
+
+### External Services
+
+<Accordion title="TMDB Service" icon="film">
+  **Location**: `src/infrastructure/external/tmdbService.ts`
+
+  ```typescript
+  import axios from "axios";
+
+  const TMDB_API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+  const BASE_URL = "https://api.themoviedb.org/3";
+
+  export interface TmdbMovie {
+    id: number;
+    title?: string;
+    name?: string;
+    poster_path: string | null;
+    backdrop_path: string | null;
+    overview: string;
+    vote_average: number;
+    release_date?: string;
+    first_air_date?: string;
+    genre_ids: number[];
+    media_type?: string;
+  }
+
+  const tmdbClient = axios.create({
+    baseURL: BASE_URL,
+    params: { api_key: TMDB_API_KEY, language: "es-ES" },
+  });
+
+  export async function getTrendingAll(timeWindow: "day" | "week" = "week"): Promise<TmdbMovie[]> {
+    const { data } = await tmdbClient.get(`/trending/all/${timeWindow}`);
+    return data.results.slice(0, 10);
+  }
+
+  export async function getNowPlayingMovies(): Promise<TmdbMovie[]> {
+    const { data } = await tmdbClient.get("/movie/now_playing");
+    return data.results.slice(0, 10);
+  }
+
+  export function getPosterUrl(path: string | null, size = "w500"): string {
+    if (!path) return "/images/placeholder.jpg";
+    return `https://image.tmdb.org/t/p/${size}${path}`;
+  }
+  ```
+
+  **Features**:
+  - Axios client with pre-configured base URL and API key
+  - Spanish language content ("es-ES")
+  - Helper functions for poster URLs
+</Accordion>
+
+## Presentation Layer
+
+The **Presentation Layer** handles user interaction through React components and API routes.
+
+### API Route Example
+
+<Accordion title="Order API Route" icon="route">
+  **Location**: `src/app/api/orders/route.ts`
+
+  ```typescript
+  import { NextRequest, NextResponse } from "next/server";
+  import { CreateOrderUseCase } from "@/application/use-cases/CreateOrderUseCase";
+  import { MongoCustomerRepository } from "@/infrastructure/repositories/MongoCustomerRepository";
+  import { MongoOrderRepository } from "@/infrastructure/repositories/MongoOrderRepository";
+
+  export async function POST(req: NextRequest) {
+    // Rate limiting
+    const ip = getClientIp(req);
+    if (!checkRateLimit(`orders:${ip}`, 5, 10 * 60 * 1000)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
+
+    try {
+      const body = await req.json();
+
+      // Input sanitization
+      const name = sanitizeString(body.name, 100);
+      const email = sanitizeEmail(body.email);
+      // ... more sanitization
+
+      // Dependency injection
+      const customerRepo = new MongoCustomerRepository();
+      const orderRepo = new MongoOrderRepository();
+      const useCase = new CreateOrderUseCase(customerRepo, orderRepo);
+
+      // Execute use case
+      const result = await useCase.execute({
+        name, email, phone, planId, devices, months, amount,
+        paymentMethod, paymentReceiptId,
+      });
+
+      return NextResponse.json(result, { status: 201 });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Internal server error";
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+  }
+  ```
+
+  **Layers Interaction**:
+  1. **Presentation** receives HTTP request
+  2. **Presentation** sanitizes and validates input
+  3. **Presentation** instantiates repositories (Infrastructure)
+  4. **Presentation** creates use case (Application)
+  5. **Application** orchestrates domain logic
+  6. **Domain** enforces business rules
+  7. **Infrastructure** persists to database
+  8. **Presentation** returns HTTP response
+</Accordion>
+
+### Component Organization
+
+<CardGroup cols={2}>
+  <Card title="Section Components" icon="puzzle-piece">
+    **Location**: `src/presentation/components/sections/`
+
+    - `HeroSection.tsx`: Landing hero with animations
+    - `PlansSection.tsx`: Pricing display
+    - `CatalogSection.tsx`: Content showcase
+    - `CheckoutModal.tsx`: Payment form
+    - `ContactSection.tsx`: Contact info
+    - `Footer.tsx`: Site footer
+    - `Navbar.tsx`: Navigation bar
+  </Card>
+
+  <Card title="UI Components" icon="palette">
+    **Location**: `src/presentation/components/ui/`
+
+    - `BackgroundGradient.tsx`: Gradient effects
+    - `GlowCard.tsx`: Card with glow effect
+    - `MovingCards.tsx`: Animated card carousel
+    - `Spotlight.tsx`: Spotlight effect
+    - `SparklesCore.tsx`: Particle effects
+    - `TextReveal.tsx`: Text animations
+    - `NumberCounter.tsx`: Animated counters
+  </Card>
+</CardGroup>
+
+## Benefits of DDD Architecture
+
+<CardGroup cols={2}>
+  <Card title="Testability" icon="vial">
+    Domain logic can be tested without:
+    - Database connections
+    - HTTP requests
+    - Framework dependencies
+
+    Example: Test `CreateOrderUseCase` with mock repositories
+  </Card>
+
+  <Card title="Flexibility" icon="shuffle">
+    Easy to swap implementations:
+    - MongoDB → PostgreSQL
+    - Stripe → another payment processor
+    - Next.js API → Express.js
+
+    Just implement the interfaces!
+  </Card>
+
+  <Card title="Clarity" icon="lightbulb">
+    Each layer has a clear purpose:
+    - Domain: Business rules
+    - Application: Workflows
+    - Infrastructure: Technical details
+    - Presentation: User interaction
+  </Card>
+
+  <Card title="Maintainability" icon="wrench">
+    Changes are localized:
+    - Database schema change? Update infrastructure layer
+    - New business rule? Update domain layer
+    - UI redesign? Update presentation layer
+  </Card>
+</CardGroup>
+
+## Dependency Flow
+
+<Note>
+  **Dependency Rule**: Dependencies point inward. Outer layers depend on inner layers, never the reverse.
+</Note>
+
+```plaintext
+Presentation ──────► Application ──────► Domain
+     │                                       ▲
+     │                                       │
+     └─────────► Infrastructure ────────────┘
+```
+
+- **Presentation** depends on Application and Infrastructure
+- **Application** depends on Domain
+- **Infrastructure** implements Domain interfaces
+- **Domain** depends on nothing (pure business logic)
+
+## Real-World Example Flow
+
+Let's trace a complete order creation:
+
+1. **User Action**: Customer clicks "Pay" in `CheckoutModal.tsx` (Presentation)
+2. **HTTP Request**: POST to `/api/orders` route (Presentation)
+3. **Validation**: Rate limiting, sanitization, honeypot check (Presentation)
+4. **Dependency Injection**: Create repositories and use case (Presentation)
+5. **Use Case Execution**: `CreateOrderUseCase.execute()` (Application)
+6. **Value Object Validation**: `new Email()`, `new Phone()` (Domain)
+7. **Entity Creation**: `createCustomer()`, `createOrder()` (Domain)
+8. **Persistence**: `customerRepo.create()`, `orderRepo.create()` (Infrastructure)
+9. **Database Operation**: Mongoose inserts to MongoDB (Infrastructure)
+10. **Response Mapping**: Entity → DTO → JSON (Application + Presentation)
+11. **HTTP Response**: 201 with order details (Presentation)
+
+<Note>
+  Notice how each layer has a specific role, and the domain layer never knows about MongoDB, HTTP, or Next.js!
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Project Structure" icon="folder-tree" href="/architecture/project-structure">
+    Complete directory tree and file details
+  </Card>
+
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Detailed endpoint documentation
+  </Card>
+
+  <Card title="Development Guide" icon="hammer" href="/architecture/overview">
+    Setup and workflow instructions
+  </Card>
+
+  <Card title="Architecture Overview" icon="sitemap" href="/architecture/overview">
+    High-level system architecture
+  </Card>
+</CardGroup>

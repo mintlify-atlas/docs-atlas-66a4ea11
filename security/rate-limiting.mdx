@@ -1,0 +1,182 @@
+---
+title: 'Rate Limiting'
+description: 'Protect your API endpoints from abuse with in-memory rate limiting'
+icon: 'gauge-high'
+---
+
+## Overview
+
+Connect World implements an in-memory rate limiter to prevent API abuse and protect against spam, DDoS attacks, and excessive usage. The rate limiter tracks requests per IP address and enforces configurable limits across all critical endpoints.
+
+<Info>
+The current implementation uses in-memory storage suitable for single-instance deployments. For production multi-instance setups, migrate to Redis for distributed rate limiting.
+</Info>
+
+## Implementation
+
+### Core Rate Limiter
+
+The rate limiter is implemented in `src/lib/rateLimiter.ts:30` and uses a simple but effective sliding window algorithm:
+
+```typescript
+export function checkRateLimit(key: string, maxReqs: number, windowMs: number): boolean {
+  const now = Date.now();
+  const entry = store.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    store.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+
+  if (entry.count >= maxReqs) return false;
+
+  entry.count += 1;
+  return true;
+}
+```
+
+### IP Address Extraction
+
+The limiter identifies clients by IP address, supporting reverse proxies and CDNs:
+
+```typescript
+export function getClientIp(req: Request): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return req.headers.get("x-real-ip") ?? "unknown";
+}
+```
+
+<Note>
+The function checks `X-Forwarded-For` first (common with load balancers), then falls back to `X-Real-IP`, ensuring accurate client identification behind proxies.
+</Note>
+
+## Memory Management
+
+The rate limiter automatically cleans up expired entries to prevent memory leaks:
+
+```typescript
+// Clean up expired entries every 5 minutes to prevent memory leaks
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of store.entries()) {
+      if (now > entry.resetAt) store.delete(key);
+    }
+  }, 5 * 60 * 1000);
+}
+```
+
+## Rate Limit Configurations
+
+Each API endpoint has tailored rate limits based on its purpose and sensitivity:
+
+### Order Creation
+
+**Endpoint:** `/api/orders`  
+**Limit:** 5 requests per 10 minutes  
+**Purpose:** Anti-spam protection for order submissions
+
+```typescript
+// Rate limit: 5 order creations per IP per 10 minutes (anti-spam)
+const ip = getClientIp(req);
+if (!checkRateLimit(`orders:${ip}`, 5, 10 * 60 * 1000)) {
+  return NextResponse.json(
+    { error: "Demasiadas solicitudes. Intenta de nuevo en unos minutos." },
+    { status: 429 }
+  );
+}
+```
+
+<Warning>
+This aggressive limit prevents automated order creation abuse. Legitimate users rarely need to create more than 5 orders in 10 minutes.
+</Warning>
+
+### Stripe Payment Intents
+
+**Endpoint:** `/api/stripe`  
+**Limit:** 10 requests per 15 minutes  
+**Purpose:** Prevent payment intent spam and potential card testing
+
+```typescript
+// Rate limit: 10 payment-intent attempts per IP per 15 minutes
+const ip = getClientIp(req);
+if (!checkRateLimit(`stripe:${ip}`, 10, 15 * 60 * 1000)) {
+  return NextResponse.json(
+    { error: "Demasiadas solicitudes. Intenta de nuevo en unos minutos." },
+    { status: 429 }
+  );
+}
+```
+
+### PayPal Order Creation
+
+**Endpoint:** `/api/paypal/create-order`  
+**Limit:** 10 requests per 15 minutes  
+**Purpose:** Prevent PayPal API abuse and excessive order creation
+
+```typescript
+// Rate limit: 10 PayPal order creations per IP per 15 minutes
+const ip = getClientIp(req);
+if (!checkRateLimit(`paypal-create:${ip}`, 10, 15 * 60 * 1000)) {
+  return NextResponse.json(
+    { error: "Demasiadas solicitudes. Intenta de nuevo en unos minutos." },
+    { status: 429 }
+  );
+}
+```
+
+## Best Practices
+
+<Accordion title="Choose appropriate limits">
+  Set limits based on expected legitimate usage patterns. Too strict limits frustrate users; too lenient limits fail to prevent abuse. Monitor your endpoint usage to find the right balance.
+</Accordion>
+
+<Accordion title="Use unique rate limit keys">
+  Each endpoint should have its own rate limit key (e.g., `orders:${ip}`, `stripe:${ip}`). This prevents legitimate usage on one endpoint from affecting others.
+</Accordion>
+
+<Accordion title="Return meaningful error messages">
+  Always return HTTP 429 (Too Many Requests) with a clear message explaining when the user can retry. This improves user experience and reduces support requests.
+</Accordion>
+
+<Accordion title="Consider upgrading to distributed rate limiting">
+  For production deployments with multiple instances:
+  - Use Redis with sliding window counters
+  - Implement the Token Bucket or Leaky Bucket algorithm
+  - Consider rate limiting by user ID in addition to IP
+  - Add rate limit headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`)
+</Accordion>
+
+## Scaling Considerations
+
+<Warning>
+**Single-Instance Limitation:** The current in-memory implementation only works within a single Node.js process. Each instance maintains its own rate limit counters.
+
+For multi-instance deployments (Kubernetes, Vercel Edge Functions with multiple regions, etc.), you MUST migrate to a distributed solution like Redis.
+</Warning>
+
+### Migration Path
+
+1. **Set up Redis** instance (AWS ElastiCache, Upstash, Redis Cloud)
+2. **Replace the Map** with Redis commands:
+   ```typescript
+   // Instead of: store.set(key, { count: 1, resetAt })
+   await redis.set(key, 1, 'PX', windowMs);
+   await redis.incr(key);
+   ```
+3. **Use atomic operations** to prevent race conditions
+4. **Add rate limit headers** for better client visibility
+
+## Security Benefits
+
+- **Prevents brute force attacks** on payment endpoints
+- **Mitigates DDoS** by limiting requests per IP
+- **Reduces spam** and fraudulent order submissions
+- **Protects external APIs** (Stripe, PayPal) from excessive usage
+- **Saves costs** by preventing API quota exhaustion
+
+## Related Documentation
+
+- [Data Sanitization](/security/data-sanitization) - Input validation and cleaning
+- [Validation](/security/validation) - Business logic validation rules

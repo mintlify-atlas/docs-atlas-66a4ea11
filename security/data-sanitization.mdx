@@ -1,0 +1,394 @@
+---
+title: 'Data Sanitization'
+description: 'Utility functions for cleaning and normalizing user inputs'
+icon: 'filter'
+---
+
+## Overview
+
+The sanitization layer (`src/lib/sanitize.ts`) provides type-safe functions for cleaning user inputs before validation and storage. These utilities protect against injection attacks, normalize data formats, and enforce constraints.
+
+<Info>
+**Sanitization vs Validation:** Sanitization **transforms** input into a safe format. Validation **checks** if input meets business rules. Always sanitize first, then validate.
+</Info>
+
+## Core Sanitization Functions
+
+### String Sanitization
+
+Removes dangerous characters and enforces length limits:
+
+```typescript
+export function sanitizeString(value: unknown, maxLength = 200): string {
+  if (typeof value !== "string") return "";
+  return value
+    .trim()
+    .replace(/<[^>]*>/g, "")          // strip HTML tags
+    .replace(/[\x00-\x08\x0B\x0E-\x1F\x7F]/g, "") // strip control chars
+    .slice(0, maxLength);
+}
+```
+
+**Features:**
+- Trims whitespace from both ends
+- Strips all HTML tags (prevents XSS)
+- Removes ASCII control characters (NULL, BEL, etc.)
+- Enforces maximum length (defaults to 200 characters)
+- Returns empty string for non-string inputs
+
+**Usage examples:**
+
+```typescript
+// Customer name
+const name = sanitizeString(body.name, 100);
+
+// Plan ID
+const planId = sanitizeString(body.planId, 50);
+
+// Payment receipt ID
+const paymentReceiptId = sanitizeString(body.paymentReceiptId, 200);
+```
+
+<Warning>
+**XSS Prevention:** HTML tag stripping is essential for preventing Cross-Site Scripting attacks. Never render unsanitized user input in HTML contexts.
+</Warning>
+
+<Accordion title="What are control characters?">
+  Control characters (bytes 0x00-0x1F and 0x7F) are non-printable characters like NULL (`\0`), backspace (`\b`), and bell (`\a`). They can cause issues in:
+  
+  - Database storage (NULL terminates strings in some systems)
+  - JSON serialization (invalid in JSON strings)
+  - Terminal output (can manipulate display)
+  - Log injection attacks
+  
+  Removing them ensures data is safe for all contexts.
+</Accordion>
+
+### Email Sanitization
+
+Validates and normalizes email addresses:
+
+```typescript
+export function sanitizeEmail(value: unknown): string {
+  const s = sanitizeString(value, 254);
+  const emailRe = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+  return emailRe.test(s) ? s.toLowerCase() : "";
+}
+```
+
+**Features:**
+- Inherits all string sanitization (HTML stripping, control char removal)
+- Validates email format with RFC-compliant regex
+- Normalizes to lowercase (prevents duplicate accounts)
+- Respects RFC 5321 maximum length (254 characters)
+- Returns empty string for invalid emails
+
+**Usage:**
+
+```typescript
+const email = sanitizeEmail(body.email);
+if (!email) {
+  return NextResponse.json(
+    { error: "Invalid email address" },
+    { status: 400 }
+  );
+}
+```
+
+<Note>
+**Case normalization:** `user@EXAMPLE.com` and `USER@example.com` are treated as the same address, preventing duplicate accounts with different casing.
+</Note>
+
+### Phone Number Sanitization
+
+Validates phone number format:
+
+```typescript
+export function sanitizePhone(value: unknown): string {
+  const s = sanitizeString(value, 20);
+  return /^[\d+\-\s()]{6,20}$/.test(s) ? s : "";
+}
+```
+
+**Features:**
+- Allows digits, plus sign, spaces, dashes, and parentheses
+- Enforces 6-20 character length (international format)
+- Returns empty string for invalid formats
+
+**Valid formats:**
+```
++1 (555) 123-4567
+555-123-4567
++52 55 1234 5678
+5551234567
+```
+
+**Invalid formats (rejected):**
+```
+555-CALL-NOW  (contains letters)
+12345         (too short)
+abcdef        (no digits)
+```
+
+### Number Sanitization
+
+Validates numeric input within a range:
+
+```typescript
+export function sanitizeNumber(value: unknown, min: number, max: number): number | null {
+  const n = Number(value);
+  if (!isFinite(n) || n < min || n > max) return null;
+  return n;
+}
+```
+
+**Features:**
+- Coerces input to number
+- Rejects `NaN`, `Infinity`, and `-Infinity`
+- Enforces inclusive min/max bounds
+- Returns `null` for invalid input (not `0` or `-1`)
+
+**Usage examples:**
+
+```typescript
+// Device count: 1-10
+const devices = sanitizeNumber(body.devices, 1, 10);
+
+// Subscription months: 1-12
+const months = sanitizeNumber(body.months, 1, 12);
+
+// Payment amount: $1-$10,000
+const amount = sanitizeNumber(body.amount, 1, 10000);
+
+if (devices === null || months === null || amount === null) {
+  return NextResponse.json(
+    { error: "Invalid numeric input" },
+    { status: 400 }
+  );
+}
+```
+
+<Warning>
+**Null vs zero:** Returning `null` for invalid input prevents ambiguity. If we returned `0`, you couldn't distinguish between "user entered 0" and "validation failed". Always check for `null` explicitly.
+</Warning>
+
+### Enum Sanitization
+
+Validates against an allowlist of string literals:
+
+```typescript
+export function sanitizeEnum<T extends string>(value: unknown, allowed: readonly T[]): T | null {
+  if (typeof value !== "string") return null;
+  return (allowed as readonly string[]).includes(value) ? (value as T) : null;
+}
+```
+
+**Features:**
+- Type-safe with TypeScript generics
+- Only accepts predefined values (allowlist approach)
+- Returns `null` for invalid input
+
+**Usage:**
+
+```typescript
+const PAYMENT_METHODS = ["stripe", "paypal"] as const;
+type PaymentMethod = typeof PAYMENT_METHODS[number]; // "stripe" | "paypal"
+
+const paymentMethod = sanitizeEnum<PaymentMethod>(body.paymentMethod, PAYMENT_METHODS);
+
+if (!paymentMethod) {
+  return NextResponse.json(
+    { error: "Invalid payment method" },
+    { status: 400 }
+  );
+}
+```
+
+<Info>
+**Allowlist security:** Only accepting predefined values prevents injection attacks and ensures type safety. Never use blocklists for enums.
+</Info>
+
+## Real-World Usage
+
+### Order Creation Endpoint
+
+Complete sanitization example from `src/app/api/orders/route.ts:38`:
+
+```typescript
+const body = await req.json();
+
+// Sanitize and validate every field
+const name  = sanitizeString(body.name, 100);
+const email = sanitizeEmail(body.email);
+const phone = sanitizePhone(body.phone);
+const planId = sanitizeString(body.planId, 50);
+const devices = sanitizeNumber(body.devices, 1, 10);
+const months  = sanitizeNumber(body.months, 1, 12);
+const amount  = sanitizeNumber(body.amount, 1, 10000);
+const paymentMethod = sanitizeEnum<PaymentMethod>(body.paymentMethod, PAYMENT_METHODS);
+const paymentReceiptId = sanitizeString(body.paymentReceiptId, 200);
+
+if (!name || !email || !phone || !planId || devices === null || months === null || amount === null || !paymentMethod || !paymentReceiptId) {
+  return NextResponse.json({ error: "Datos del formulario inválidos o incompletos." }, { status: 400 });
+}
+```
+
+### Stripe Payment Intent
+
+From `src/app/api/stripe/route.ts:22`:
+
+```typescript
+const body = await req.json();
+
+const planId = sanitizeString(body.planId, 50);
+const months = sanitizeNumber(body.months, 1, 12);
+const amount = sanitizeNumber(body.amount, 1, 10000);
+
+if (!planId || months === null || amount === null) {
+  return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+}
+```
+
+### PayPal Order Creation
+
+From `src/app/api/paypal/create-order/route.ts:40`:
+
+```typescript
+const body = await req.json();
+
+const planId = sanitizeString(body.planId, 50);
+const months = sanitizeNumber(body.months, 1, 12);
+const amount = sanitizeNumber(body.amount, 1, 10000);
+
+if (!planId || months === null || amount === null) {
+  return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+}
+```
+
+## Sanitization Best Practices
+
+<Accordion title="Sanitize at the API boundary">
+  Apply sanitization immediately after receiving user input, before any processing or validation. This creates a clean security perimeter.
+  
+  ```typescript
+  // ✅ Good: Sanitize immediately
+  const body = await req.json();
+  const email = sanitizeEmail(body.email);
+  
+  // ❌ Bad: Use raw input
+  const body = await req.json();
+  if (!body.email.includes('@')) { ... }
+  ```
+</Accordion>
+
+<Accordion title="Never trust client-side sanitization">
+  Always sanitize on the server, even if you also sanitize on the client. Attackers can bypass client-side code entirely by crafting raw HTTP requests.
+</Accordion>
+
+<Accordion title="Use appropriate functions for data types">
+  Don't use `sanitizeString` for emails or phone numbers. Each data type has specific validation requirements.
+  
+  ```typescript
+  // ✅ Good: Type-specific sanitization
+  const email = sanitizeEmail(body.email);
+  const phone = sanitizePhone(body.phone);
+  
+  // ❌ Bad: Generic sanitization loses validation
+  const email = sanitizeString(body.email);
+  const phone = sanitizeString(body.phone);
+  ```
+</Accordion>
+
+<Accordion title="Set appropriate length limits">
+  Choose maximum lengths based on database schema and business requirements. Default to conservative limits.
+  
+  ```typescript
+  // ✅ Good: Explicit limits based on requirements
+  const name = sanitizeString(body.name, 100);  // Names rarely exceed 100 chars
+  const planId = sanitizeString(body.planId, 50); // IDs are short
+  
+  // ❌ Bad: Using defaults without consideration
+  const description = sanitizeString(body.description); // 200 char default might be too short
+  ```
+</Accordion>
+
+<Accordion title="Check for null/empty after sanitization">
+  Sanitization functions return empty strings or `null` for invalid input. Always validate the result.
+  
+  ```typescript
+  // ✅ Good: Validate after sanitization
+  const email = sanitizeEmail(body.email);
+  if (!email) {
+    return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+  }
+  
+  // ❌ Bad: Assume sanitization succeeds
+  const email = sanitizeEmail(body.email);
+  await saveEmail(email); // Might save empty string!
+  ```
+</Accordion>
+
+## Attack Vectors Prevented
+
+| Attack Type | Prevention Mechanism |
+|-------------|---------------------|
+| **XSS (Cross-Site Scripting)** | HTML tag stripping in `sanitizeString` |
+| **SQL Injection** | String sanitization removes SQL metacharacters |
+| **NoSQL Injection** | Type coercion and allowlist validation |
+| **Control Character Injection** | Explicit removal of ASCII control chars |
+| **Buffer Overflow** | Maximum length enforcement |
+| **Type Confusion** | Strict type checking and coercion |
+| **Format String Attacks** | Input normalization and validation |
+| **Email Enumeration** | Case normalization and format validation |
+
+## Security Considerations
+
+<Warning>
+**Defense in Depth:** Sanitization is ONE layer of security. Always combine it with:
+- Rate limiting
+- Business logic validation  
+- Authentication and authorization
+- Parameterized database queries
+- Output encoding
+</Warning>
+
+<Note>
+**Context-Specific Encoding:** Sanitization prepares data for storage and processing. When outputting data to different contexts (HTML, JSON, SQL), apply context-specific encoding:
+- HTML output: HTML entity encoding
+- JavaScript: JSON.stringify with proper escaping
+- SQL: Parameterized queries (never string concatenation)
+</Note>
+
+## Testing Sanitization
+
+Always test sanitization functions with malicious input:
+
+```typescript
+// XSS attempts
+sanitizeString('<script>alert(1)</script>');  // → ''
+sanitizeString('Hello<img src=x onerror=alert(1)>'); // → 'Hello'
+
+// SQL injection attempts
+sanitizeString("'; DROP TABLE users; --"); // → ' DROP TABLE users --'
+
+// Control character injection
+sanitizeString('Hello\x00World'); // → 'HelloWorld'
+
+// Email validation
+sanitizeEmail('user@EXAMPLE.COM'); // → 'user@example.com'
+sanitizeEmail('not-an-email'); // → ''
+
+// Number validation
+sanitizeNumber('100', 1, 10); // → null (exceeds max)
+sanitizeNumber('5.5', 1, 10); // → 5.5
+sanitizeNumber('NaN', 1, 10); // → null
+
+// Enum validation
+sanitizeEnum('stripe', ['stripe', 'paypal']); // → 'stripe'
+sanitizeEnum('bitcoin', ['stripe', 'paypal']); // → null
+```
+
+## Related Documentation
+
+- [Validation](/security/validation) - Business logic validation after sanitization
+- [Rate Limiting](/security/rate-limiting) - Request throttling configuration

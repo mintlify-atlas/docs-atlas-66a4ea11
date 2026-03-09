@@ -1,0 +1,317 @@
+---
+title: 'Orders API'
+description: 'Create and manage subscription orders for Connect World streaming service'
+icon: 'cart-shopping'
+---
+
+## POST /api/orders
+
+Create a new subscription order after payment has been processed. This endpoint validates all data server-side and creates both a customer record and order.
+
+<Note>
+  **Important:** This endpoint should only be called after successfully processing payment through Stripe or PayPal. The `paymentReceiptId` must be the payment intent ID or order ID from the payment provider.
+</Note>
+
+### Rate Limiting
+
+- **Limit:** 5 requests per IP
+- **Window:** 10 minutes
+- **Purpose:** Anti-spam protection
+
+### Security Features
+
+- Honeypot field detection (`_hp`) to catch bots
+- Server-side price validation to prevent tampering
+- Input sanitization on all fields
+- Plan and duration validation
+
+### Request Body
+
+<ParamField path="name" type="string" required>
+  Customer's full name (max 100 characters)
+  
+  Example: `"Juan Pérez"`
+</ParamField>
+
+<ParamField path="email" type="string" required>
+  Customer's email address (must be valid email format)
+  
+  Example: `"juan@example.com"`
+</ParamField>
+
+<ParamField path="phone" type="string" required>
+  Customer's phone number (sanitized format)
+  
+  Example: `"+1234567890"`
+</ParamField>
+
+<ParamField path="planId" type="string" required>
+  Plan identifier (max 50 characters)
+  
+  Must be one of: `plan-1` (Basic), `plan-2` (Standard), `plan-3` (Premium)
+  
+  Example: `"plan-2"`
+</ParamField>
+
+<ParamField path="devices" type="number" required>
+  Number of simultaneous devices (1-10 range, must match plan)
+  
+  - `1` for Basic plan
+  - `2` for Standard plan
+  - `3` for Premium plan
+  
+  Example: `2`
+</ParamField>
+
+<ParamField path="months" type="number" required>
+  Subscription duration in months (1-12 range)
+  
+  Must be one of: `1`, `2`, `3`, `6`, or `12`
+  
+  Example: `6`
+</ParamField>
+
+<ParamField path="amount" type="number" required>
+  Payment amount in USD (1-10000 range)
+  
+  Must exactly match the plan's price for the selected duration (validated server-side within 0.01 tolerance)
+  
+  Example: `70`
+</ParamField>
+
+<ParamField path="paymentMethod" type="string" required>
+  Payment provider used
+  
+  Must be either: `"stripe"` or `"paypal"`
+  
+  Example: `"stripe"`
+</ParamField>
+
+<ParamField path="paymentReceiptId" type="string" required>
+  Payment receipt ID from payment provider (max 200 characters)
+  
+  - For Stripe: Payment Intent ID (e.g., `pi_xxxxx`)
+  - For PayPal: Captured Order ID (e.g., `7XX12345XX123456X`)
+  
+  Example: `"pi_3AbCdEfGhIjKlMnO"`
+</ParamField>
+
+<ParamField path="_hp" type="string" default="">
+  Honeypot field (should be empty for legitimate requests)
+  
+  This hidden field catches bots - if filled, request is silently rejected with fake success response
+</ParamField>
+
+### Response
+
+<ResponseField name="orderId" type="string">
+  Unique identifier for the created order
+</ResponseField>
+
+<ResponseField name="expirationDate" type="string">
+  ISO 8601 date string indicating when the subscription expires
+  
+  Calculated as: current date + months from request
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/orders \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Juan Pérez",
+    "email": "juan@example.com",
+    "phone": "+1234567890",
+    "planId": "plan-2",
+    "devices": 2,
+    "months": 6,
+    "amount": 70,
+    "paymentMethod": "stripe",
+    "paymentReceiptId": "pi_3AbCdEfGhIjKlMnO"
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://your-domain.com/api/orders', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    name: 'Juan Pérez',
+    email: 'juan@example.com',
+    phone: '+1234567890',
+    planId: 'plan-2',
+    devices: 2,
+    months: 6,
+    amount: 70,
+    paymentMethod: 'stripe',
+    paymentReceiptId: 'pi_3AbCdEfGhIjKlMnO',
+  }),
+});
+
+const data = await response.json();
+console.log(data.orderId, data.expirationDate);
+```
+
+```python Python
+import requests
+import json
+
+response = requests.post(
+    'https://your-domain.com/api/orders',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({
+        'name': 'Juan Pérez',
+        'email': 'juan@example.com',
+        'phone': '+1234567890',
+        'planId': 'plan-2',
+        'devices': 2,
+        'months': 6,
+        'amount': 70,
+        'paymentMethod': 'stripe',
+        'paymentReceiptId': 'pi_3AbCdEfGhIjKlMnO'
+    })
+)
+
+data = response.json()
+print(f"Order: {data['orderId']}, Expires: {data['expirationDate']}")
+```
+</CodeGroup>
+
+### Example Response
+
+```json 201 Created
+{
+  "orderId": "65f8a9b2c3d4e5f6a7b8c9d0",
+  "expirationDate": "2026-09-09T12:34:56.789Z"
+}
+```
+
+## Error Responses
+
+<Expandable title="400 Bad Request - Missing or Invalid Data">
+```json
+{
+  "error": "Datos del formulario inválidos o incompletos."
+}
+```
+
+Returned when required fields are missing, empty, or have invalid formats.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Plan">
+```json
+{
+  "error": "Plan inválido."
+}
+```
+
+Returned when `planId` is not one of: `plan-1`, `plan-2`, or `plan-3`.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Duration">
+```json
+{
+  "error": "Duración inválida."
+}
+```
+
+Returned when `months` is not one of: 1, 2, 3, 6, or 12.
+</Expandable>
+
+<Expandable title="400 Bad Request - Price Mismatch">
+```json
+{
+  "error": "Monto inválido."
+}
+```
+
+Returned when `amount` doesn't match the expected price for the plan and duration (tolerance: 0.01).
+</Expandable>
+
+<Expandable title="400 Bad Request - Device Count Mismatch">
+```json
+{
+  "error": "Número de dispositivos inválido."
+}
+```
+
+Returned when `devices` doesn't match the plan's device count.
+</Expandable>
+
+<Expandable title="429 Too Many Requests - Rate Limited">
+```json
+{
+  "error": "Demasiadas solicitudes. Intenta de nuevo en unos minutos."
+}
+```
+
+Returned when more than 5 requests are made from the same IP within 10 minutes.
+</Expandable>
+
+<Expandable title="500 Internal Server Error">
+```json
+{
+  "error": "Internal server error"
+}
+```
+
+Returned when an unexpected error occurs. Check server logs for details.
+</Expandable>
+
+## Validation Rules
+
+The endpoint performs extensive server-side validation:
+
+| Field | Validation |
+|-------|------------|
+| `name` | Required, max 100 chars, sanitized string |
+| `email` | Required, valid email format |
+| `phone` | Required, sanitized phone format |
+| `planId` | Required, must exist in PLANS, max 50 chars |
+| `devices` | Required, 1-10 range, must match plan |
+| `months` | Required, must be 1, 2, 3, 6, or 12 |
+| `amount` | Required, 1-10000 range, must match plan price |
+| `paymentMethod` | Required, must be "stripe" or "paypal" |
+| `paymentReceiptId` | Required, max 200 chars |
+
+## Implementation Details
+
+<Note>
+  The endpoint is implemented in `/src/app/api/orders/route.ts:19` and uses the following architecture:
+  
+  - **Use Case:** `CreateOrderUseCase` (Clean Architecture)
+  - **Repositories:** `MongoCustomerRepository`, `MongoOrderRepository`
+  - **Security:** Rate limiting, honeypot detection, input sanitization
+  - **Validation:** Server-side price and plan validation
+</Note>
+
+## Workflow Example
+
+1. User selects **Standard plan** (plan-2) for **6 months**
+2. Client calculates price: **$70**
+3. Client creates Stripe payment intent via `/api/stripe`
+4. User completes payment, receives payment intent ID: `pi_3AbCdEfGhIjKlMnO`
+5. Client calls `/api/orders` with all details including `paymentReceiptId`
+6. Server validates everything and creates order
+7. Response includes `orderId` and `expirationDate`
+8. Client shows confirmation to user
+
+## Testing
+
+<Warning>
+  When testing, ensure you:
+  - Use valid plan IDs and correct pricing
+  - Don't exceed rate limits (5 per 10 minutes)
+  - Provide real payment receipt IDs from test payment providers
+  - Leave the `_hp` honeypot field empty
+</Warning>
+
+## See Also
+
+- [Stripe API](/api/stripe) - Create payment intents for Stripe payments
+- [PayPal API](/api/paypal) - Create and capture PayPal orders
+- [API Overview](/api/overview) - General API information and authentication

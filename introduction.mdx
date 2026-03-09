@@ -1,0 +1,180 @@
+---
+title: Introduction
+description: Welcome to Connect World - A modern streaming service platform built with Next.js
+---
+
+# Welcome to Connect World
+
+Connect World is a comprehensive streaming service SaaS platform that enables users to subscribe to video content with flexible payment options and multi-device streaming capabilities.
+
+## What is Connect World?
+
+Connect World is a production-ready streaming platform that combines:
+
+- **Content Streaming**: Integration with TMDB (The Movie Database) for rich media catalogs
+- **Subscription Management**: Flexible plans with 1, 2, or 3 device tiers
+- **Payment Processing**: Dual payment provider support (Stripe & PayPal)
+- **Customer Portal**: Secure checkout and order management
+
+<Info>
+Connect World follows **Clean Architecture** principles with clear separation between domain, application, infrastructure, and presentation layers.
+</Info>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multiple Subscription Plans" icon="layer-group">
+    Three tier system (Basic, Standard, Premium) with flexible duration options from 1 to 12 months
+  </Card>
+  <Card title="Dual Payment Processing" icon="credit-card">
+    Integrated Stripe and PayPal payment gateways with secure transaction handling
+  </Card>
+  <Card title="TMDB Integration" icon="film">
+    Real-time content catalog powered by The Movie Database API with trending movies and series
+  </Card>
+  <Card title="MongoDB Database" icon="database">
+    Scalable NoSQL database with Mongoose ODM for customer and order management
+  </Card>
+  <Card title="Rate Limiting" icon="shield">
+    Built-in rate limiting protection for API endpoints (10 requests per 15 minutes)
+  </Card>
+  <Card title="Security Hardened" icon="lock">
+    Comprehensive security headers including CSP, HSTS, and XSS protection
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+Connect World implements a clean, layered architecture:
+
+```typescript
+src/
+├── domain/           # Business entities and rules
+│   ├── entities/     # Plan, Order, Customer
+│   ├── repositories/ # Repository interfaces
+│   └── value-objects/# Email, Phone validation
+├── application/      # Use cases and DTOs
+├── infrastructure/   # External services
+│   ├── database/     # MongoDB models
+│   └── external/     # TMDB API client
+└── presentation/     # React components
+```
+
+<Note>
+The architecture ensures that business logic in the `domain` layer is completely independent of frameworks and external dependencies.
+</Note>
+
+## Technology Stack
+
+### Core Framework
+- **Next.js 16.1.6** - React framework with App Router
+- **React 19.2.3** - UI library
+- **TypeScript 5** - Type-safe development
+
+### Database & ORM
+- **MongoDB** - NoSQL database
+- **Mongoose 9.2.4** - MongoDB object modeling
+
+### Payment Processing
+- **Stripe 20.4.1** - Payment processing SDK
+- **@stripe/stripe-js 8.9.0** - Stripe.js for frontend
+- **@stripe/react-stripe-js 5.6.1** - React components
+- **@paypal/react-paypal-js 9.0.1** - PayPal integration
+
+### Content API
+- **TMDB API** - Movie and TV show metadata
+- **Axios 1.13.6** - HTTP client for API requests
+
+### UI & Styling
+- **Tailwind CSS 4** - Utility-first CSS framework
+- **Framer Motion 12.35.1** - Animation library
+- **Lucide React** - Icon library
+
+## Subscription Plans
+
+Connect World offers three subscription tiers:
+
+<CodeGroup>
+```typescript Plan Structure
+export interface Plan {
+  id: string;
+  devices: 1 | 2 | 3;
+  name: string;
+  description: string;
+  prices: PlanPrice[];
+  features: string[];
+  popular?: boolean;
+}
+```
+
+```typescript Pricing Model
+const PLAN_PRICES: Record<DeviceCount, Record<PlanDuration, number>> = {
+  1: { 1: 10, 2: 20, 3: 30, 6: 60, 12: 120 },   // Basic
+  2: { 1: 15, 2: 25, 3: 35, 6: 70, 12: 140 },   // Standard
+  3: { 1: 15, 2: 30, 3: 45, 6: 80, 12: 149 },   // Premium
+};
+```
+</CodeGroup>
+
+### Plan Features
+
+**Basic Plan (1 Device)**
+- 1 simultaneous device
+- HD & Full HD quality
+- Unlimited catalog access
+- 24/7 support
+
+**Standard Plan (2 Devices)** - Most Popular
+- 2 simultaneous devices
+- HD & Full HD quality
+- Unlimited catalog access
+- Custom profiles
+- 24/7 support
+
+**Premium Plan (3 Devices)**
+- 3 simultaneous devices
+- 4K Ultra HD quality
+- Unlimited catalog access
+- Custom profiles
+- Offline downloads
+- Priority 24/7 support
+
+## Security Features
+
+Connect World implements multiple security layers:
+
+<Steps>
+  <Step title="Input Sanitization">
+    All user inputs are sanitized using custom validation functions before processing
+  </Step>
+  <Step title="Rate Limiting">
+    In-memory rate limiter protects API endpoints from abuse (10 requests per 15 minutes per IP)
+  </Step>
+  <Step title="Payment Validation">
+    Server-side price validation prevents client-side tampering
+  </Step>
+  <Step title="Security Headers">
+    Comprehensive CSP, HSTS, X-Frame-Options, and XSS protection headers
+  </Step>
+</Steps>
+
+<Warning>
+The in-memory rate limiter is suitable for single-instance deployments. For production multi-instance deployments, consider using Redis-based rate limiting.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get your first subscription running in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Complete setup guide with all configuration options
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the API endpoints and data models
+  </Card>
+  <Card title="Development Guide" icon="wrench" href="/architecture/overview">
+    Learn about the architecture and development workflow
+  </Card>
+</CardGroup>

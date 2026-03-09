@@ -1,0 +1,410 @@
+---
+title: 'Stripe API'
+description: 'Create Stripe payment intents for Connect World subscriptions'
+icon: 'stripe'
+---
+
+## POST /api/stripe
+
+Create a Stripe payment intent for processing subscription payments. This endpoint validates the plan and pricing, then returns a client secret for completing the payment on the client side.
+
+<Note>
+  This endpoint creates a payment intent but does not charge the customer. Use the returned `clientSecret` with Stripe.js or mobile SDKs to collect payment details and confirm the payment.
+</Note>
+
+### Rate Limiting
+
+- **Limit:** 10 requests per IP
+- **Window:** 15 minutes
+- **Purpose:** Prevent payment intent spam
+
+### Security Features
+
+- Server-side price validation (prevents client-side tampering)
+- Plan and duration validation
+- Input sanitization
+- Stripe API integration with automatic payment methods
+
+### Request Body
+
+<ParamField path="planId" type="string" required>
+  Plan identifier (max 50 characters)
+  
+  Must be one of: `plan-1` (Basic), `plan-2` (Standard), `plan-3` (Premium)
+  
+  Example: `"plan-2"`
+</ParamField>
+
+<ParamField path="months" type="number" required>
+  Subscription duration in months (1-12 range)
+  
+  Must be one of: `1`, `2`, `3`, `6`, or `12`
+  
+  Example: `6`
+</ParamField>
+
+<ParamField path="amount" type="number" required>
+  Payment amount in USD (1-10000 range)
+  
+  Must exactly match the plan's price for the selected duration. The server validates this to prevent price manipulation (tolerance: 0.01).
+  
+  Example: `70`
+</ParamField>
+
+### Response
+
+<ResponseField name="clientSecret" type="string">
+  Stripe payment intent client secret
+  
+  Use this with Stripe.js or mobile SDKs to complete the payment. Format: `pi_xxxxx_secret_xxxxx`
+</ResponseField>
+
+### Example Request
+
+<CodeGroup>
+```bash cURL
+curl -X POST https://your-domain.com/api/stripe \
+  -H "Content-Type: application/json" \
+  -d '{
+    "planId": "plan-2",
+    "months": 6,
+    "amount": 70
+  }'
+```
+
+```javascript JavaScript
+const response = await fetch('https://your-domain.com/api/stripe', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    planId: 'plan-2',
+    months: 6,
+    amount: 70,
+  }),
+});
+
+const { clientSecret } = await response.json();
+
+// Use clientSecret with Stripe.js
+const { error, paymentIntent } = await stripe.confirmCardPayment(
+  clientSecret,
+  {
+    payment_method: {
+      card: cardElement,
+      billing_details: { name: 'Juan Pérez' },
+    },
+  }
+);
+```
+
+```python Python
+import requests
+import json
+
+response = requests.post(
+    'https://your-domain.com/api/stripe',
+    headers={'Content-Type': 'application/json'},
+    data=json.dumps({
+        'planId': 'plan-2',
+        'months': 6,
+        'amount': 70
+    })
+)
+
+data = response.json()
+client_secret = data['clientSecret']
+print(f"Client Secret: {client_secret}")
+```
+
+```typescript TypeScript
+interface StripeRequest {
+  planId: string;
+  months: number;
+  amount: number;
+}
+
+interface StripeResponse {
+  clientSecret: string;
+}
+
+const createPaymentIntent = async (
+  planId: string,
+  months: number,
+  amount: number
+): Promise<string> => {
+  const response = await fetch('https://your-domain.com/api/stripe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ planId, months, amount }),
+  });
+  
+  const data: StripeResponse = await response.json();
+  return data.clientSecret;
+};
+```
+</CodeGroup>
+
+### Example Response
+
+```json 200 OK
+{
+  "clientSecret": "pi_3AbCdEfGhIjKlMnO_secret_1234567890abcdef"
+}
+```
+
+## Error Responses
+
+<Expandable title="400 Bad Request - Invalid Data">
+```json
+{
+  "error": "Datos inválidos."
+}
+```
+
+Returned when required fields (`planId`, `months`, `amount`) are missing or have invalid formats.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Plan">
+```json
+{
+  "error": "Plan inválido."
+}
+```
+
+Returned when `planId` is not one of: `plan-1`, `plan-2`, or `plan-3`.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Duration">
+```json
+{
+  "error": "Duración inválida."
+}
+```
+
+Returned when `months` is not one of: 1, 2, 3, 6, or 12.
+</Expandable>
+
+<Expandable title="400 Bad Request - Invalid Amount">
+```json
+{
+  "error": "Monto inválido."
+}
+```
+
+Returned when `amount` doesn't match the expected price for the plan and duration (tolerance: 0.01).
+
+This prevents client-side price manipulation.
+</Expandable>
+
+<Expandable title="429 Too Many Requests - Rate Limited">
+```json
+{
+  "error": "Demasiadas solicitudes. Intenta de nuevo en unos minutos."
+}
+```
+
+Returned when more than 10 requests are made from the same IP within 15 minutes.
+</Expandable>
+
+<Expandable title="500 Internal Server Error">
+```json
+{
+  "error": "Failed to create payment intent"
+}
+```
+
+Returned when Stripe API fails or an unexpected error occurs. The actual Stripe error message is included.
+</Expandable>
+
+## Stripe Payment Intent Details
+
+The payment intent created by this endpoint has the following configuration:
+
+<ResponseField name="amount" type="number">
+  Amount in cents (USD)
+  
+  Calculated as: `Math.round(amount * 100)`
+  
+  Example: $70.00 becomes 7000 cents
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Currency code
+  
+  Always set to: `"usd"`
+</ResponseField>
+
+<ResponseField name="automatic_payment_methods" type="object">
+  Payment method configuration
+  
+  Set to: `{ enabled: true }` to support cards, wallets, etc.
+</ResponseField>
+
+<ResponseField name="metadata" type="object">
+  Custom metadata attached to the payment intent
+  
+  Contains:
+  - `planId` (string): The selected plan ID
+  - `months` (string): Subscription duration
+  
+  Example: `{ planId: "plan-2", months: "6" }`
+</ResponseField>
+
+## Validation Rules
+
+| Field | Validation |
+|-------|------------|
+| `planId` | Required, max 50 chars, must exist in PLANS |
+| `months` | Required, must be 1, 2, 3, 6, or 12 |
+| `amount` | Required, 1-10000 range, must match plan price |
+
+## Price Validation
+
+The endpoint validates that the amount matches the expected price:
+
+```typescript
+// Price validation logic (from route.ts:42-44)
+const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+  return NextResponse.json({ error: "Monto inválido." }, { status: 400 });
+}
+```
+
+This prevents malicious clients from manipulating prices before payment.
+
+## Implementation Details
+
+<Note>
+  The endpoint is implemented in `/src/app/api/stripe/route.ts:11` and uses:
+  
+  - **Stripe SDK:** `stripe` package
+  - **Environment:** `STRIPE_SECRET_KEY` required
+  - **Security:** Rate limiting, input sanitization, price validation
+  - **Payment Methods:** Automatic payment methods enabled (cards, wallets)
+</Note>
+
+## Complete Payment Flow
+
+1. **Client:** Call `/api/stripe` with plan details
+2. **Server:** Validate plan, months, and amount
+3. **Server:** Create Stripe payment intent
+4. **Server:** Return `clientSecret`
+5. **Client:** Use `clientSecret` with Stripe.js to collect payment
+6. **Client:** Confirm payment with Stripe
+7. **Stripe:** Process payment and return payment intent ID
+8. **Client:** Call `/api/orders` with payment intent ID as `paymentReceiptId`
+9. **Server:** Create order and customer records
+10. **Client:** Show success confirmation
+
+## Example: Full Integration
+
+<CodeGroup>
+```javascript React + Stripe.js
+import { loadStripe } from '@stripe/stripe-js';
+import { Elements, CardElement, useStripe, useElements } from '@stripe/react-stripe-js';
+
+const stripePromise = loadStripe('pk_test_...');
+
+function CheckoutForm({ planId, months, amount }) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+
+    // Step 1: Create payment intent
+    const response = await fetch('/api/stripe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planId, months, amount }),
+    });
+    const { clientSecret } = await response.json();
+
+    // Step 2: Confirm payment
+    const { error, paymentIntent } = await stripe.confirmCardPayment(
+      clientSecret,
+      {
+        payment_method: {
+          card: elements.getElement(CardElement),
+          billing_details: { name: 'Customer Name' },
+        },
+      }
+    );
+
+    if (error) {
+      console.error(error.message);
+      setLoading(false);
+      return;
+    }
+
+    // Step 3: Create order
+    await fetch('/api/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Customer Name',
+        email: 'customer@example.com',
+        phone: '+1234567890',
+        planId,
+        devices: 2,
+        months,
+        amount,
+        paymentMethod: 'stripe',
+        paymentReceiptId: paymentIntent.id,
+      }),
+    });
+
+    setLoading(false);
+    alert('Subscription created successfully!');
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <CardElement />
+      <button type="submit" disabled={!stripe || loading}>
+        Pay ${amount}
+      </button>
+    </form>
+  );
+}
+```
+</CodeGroup>
+
+## Testing
+
+<Warning>
+  When testing, use Stripe test mode:
+  - Test card: `4242 4242 4242 4242`
+  - Any future expiration date
+  - Any 3-digit CVC
+  - Any ZIP code
+</Warning>
+
+### Test Scenarios
+
+| Scenario | Expected Result |
+|----------|----------------|
+| Valid plan and price | Returns `clientSecret` |
+| Invalid plan ID | 400 error: "Plan inválido." |
+| Wrong amount for plan | 400 error: "Monto inválido." |
+| Invalid duration | 400 error: "Duración inválida." |
+| 11th request in 15 min | 429 error: Rate limited |
+
+## Environment Variables
+
+Required environment variable:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_...
+```
+
+## See Also
+
+- [Orders API](/api/orders) - Create orders after payment succeeds
+- [PayPal API](/api/paypal) - Alternative payment method
+- [API Overview](/api/overview) - General API information
+- [Stripe Documentation](https://stripe.com/docs/api/payment_intents) - Official Stripe Payment Intents docs

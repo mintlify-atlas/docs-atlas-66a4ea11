@@ -1,0 +1,259 @@
+---
+title: 'Input Validation'
+description: 'Comprehensive validation rules protecting order processing and payment flows'
+icon: 'shield-check'
+---
+
+## Overview
+
+Connect World implements multi-layer validation to ensure data integrity and prevent fraud. All user inputs are validated at the API boundary before reaching business logic or the database.
+
+<Info>
+Validation is applied **after** sanitization. First clean the input, then validate it against business rules.
+</Info>
+
+## Order Validation Pipeline
+
+The order creation endpoint (`src/app/api/orders/route.ts:19`) implements comprehensive validation:
+
+### 1. Rate Limiting
+
+First defense against abuse:
+
+```typescript
+const ip = getClientIp(req);
+if (!checkRateLimit(`orders:${ip}`, 5, 10 * 60 * 1000)) {
+  return NextResponse.json(
+    { error: "Demasiadas solicitudes. Intenta de nuevo en unos minutos." },
+    { status: 429 }
+  );
+}
+```
+
+### 2. Honeypot Anti-Spam
+
+Silently reject bot submissions using a hidden field:
+
+```typescript
+// Honeypot: bots fill hidden fields humans don't see
+if (body._hp && body._hp !== "") {
+  // Silently reject — return fake success so bots don't retry aggressively
+  return NextResponse.json(
+    { orderId: "bot", expirationDate: new Date().toISOString() },
+    { status: 201 }
+  );
+}
+```
+
+<Note>
+**Why fake success?** Returning errors would signal to sophisticated bots that they've been detected, potentially triggering retry logic. A fake success response wastes their resources instead.
+</Note>
+
+<Accordion title="How to implement honeypot in your frontend">
+  Add a hidden field to your form:
+  
+  ```html
+  <input type="text" name="_hp" style="display: none;" tabindex="-1" autocomplete="off" />
+  ```
+  
+  Human users never see or fill this field. Bots that auto-fill forms will populate it, revealing themselves.
+</Accordion>
+
+### 3. Field Sanitization
+
+All inputs are sanitized before validation:
+
+```typescript
+const name  = sanitizeString(body.name, 100);
+const email = sanitizeEmail(body.email);
+const phone = sanitizePhone(body.phone);
+const planId = sanitizeString(body.planId, 50);
+const devices = sanitizeNumber(body.devices, 1, 10);
+const months  = sanitizeNumber(body.months, 1, 12);
+const amount  = sanitizeNumber(body.amount, 1, 10000);
+const paymentMethod = sanitizeEnum<PaymentMethod>(body.paymentMethod, PAYMENT_METHODS);
+const paymentReceiptId = sanitizeString(body.paymentReceiptId, 200);
+```
+
+### 4. Required Field Validation
+
+Ensure all required fields are present and valid:
+
+```typescript
+if (!name || !email || !phone || !planId || devices === null || months === null || amount === null || !paymentMethod || !paymentReceiptId) {
+  return NextResponse.json(
+    { error: "Datos del formulario inválidos o incompletos." },
+    { status: 400 }
+  );
+}
+```
+
+<Warning>
+Note the `null` checks for numbers. `sanitizeNumber` returns `null` (not `0`) when validation fails, preventing the ambiguity between "invalid" and "zero".
+</Warning>
+
+## Business Logic Validation
+
+### Plan Validation
+
+Verify the plan exists in the system:
+
+```typescript
+const plan = PLANS.find((p) => p.id === planId);
+if (!plan) {
+  return NextResponse.json({ error: "Plan inválido." }, { status: 400 });
+}
+```
+
+### Duration Validation
+
+Only allow predefined subscription durations:
+
+```typescript
+const VALID_MONTHS = [1, 2, 3, 6, 12] as const;
+
+if (!(VALID_MONTHS as readonly number[]).includes(months as typeof VALID_MONTHS[number])) {
+  return NextResponse.json({ error: "Duración inválida." }, { status: 400 });
+}
+```
+
+<Info>
+Limiting valid durations prevents abuse and simplifies pricing logic. Users can only select durations you explicitly support.
+</Info>
+
+### Price Tampering Prevention
+
+**Critical security check:** Verify the submitted amount matches the actual price:
+
+```typescript
+// Validate amount matches real price (prevent price manipulation)
+const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+  return NextResponse.json({ error: "Monto inválido." }, { status: 400 });
+}
+```
+
+<Warning>
+**Never trust client-submitted prices.** Always validate against server-side pricing data. Attackers can modify frontend form values to submit fraudulent prices.
+</Warning>
+
+<Accordion title="Why use Math.abs and 0.01 tolerance?">
+  Floating-point arithmetic can introduce tiny rounding errors. Using `Math.abs(amount - expectedPrice) > 0.01` allows for 1-cent rounding differences while still catching fraud attempts.
+  
+  Without this tolerance, legitimate payments might fail due to `9.99999999` not strictly equaling `10.00`.
+</Accordion>
+
+### Device Count Validation
+
+Ensure device count matches the selected plan:
+
+```typescript
+if (devices !== plan.devices) {
+  return NextResponse.json(
+    { error: "Número de dispositivos inválido." },
+    { status: 400 }
+  );
+}
+```
+
+## Payment Endpoint Validation
+
+### Stripe Payment Intent
+
+The Stripe endpoint (`src/app/api/stripe/route.ts:11`) validates payment requests:
+
+```typescript
+const planId = sanitizeString(body.planId, 50);
+const months = sanitizeNumber(body.months, 1, 12);
+const amount = sanitizeNumber(body.amount, 1, 10000);
+
+if (!planId || months === null || amount === null) {
+  return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+}
+
+// Validate planId exists and months is a valid duration
+const plan = PLANS.find((p) => p.id === planId);
+if (!plan) {
+  return NextResponse.json({ error: "Plan inválido." }, { status: 400 });
+}
+if (!(VALID_MONTHS as readonly number[]).includes(months)) {
+  return NextResponse.json({ error: "Duración inválida." }, { status: 400 });
+}
+
+// Validate amount matches the real price (prevents price tampering)
+const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+  return NextResponse.json({ error: "Monto inválido." }, { status: 400 });
+}
+```
+
+### PayPal Order Creation
+
+The PayPal endpoint (`src/app/api/paypal/create-order/route.ts:29`) uses identical validation:
+
+```typescript
+const planId = sanitizeString(body.planId, 50);
+const months = sanitizeNumber(body.months, 1, 12);
+const amount = sanitizeNumber(body.amount, 1, 10000);
+
+if (!planId || months === null || amount === null) {
+  return NextResponse.json({ error: "Datos inválidos." }, { status: 400 });
+}
+
+const plan = PLANS.find((p) => p.id === planId);
+if (!plan) {
+  return NextResponse.json({ error: "Plan inválido." }, { status: 400 });
+}
+if (!(VALID_MONTHS as readonly number[]).includes(months)) {
+  return NextResponse.json({ error: "Duración inválida." }, { status: 400 });
+}
+
+// Prevent price tampering
+const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+  return NextResponse.json({ error: "Monto inválido." }, { status: 400 });
+}
+```
+
+<Note>
+**Consistency is key:** Both payment endpoints use the same validation logic, ensuring uniform security across payment methods.
+</Note>
+
+## Validation Best Practices
+
+<Accordion title="Validate at the API boundary">
+  Never trust client-side validation alone. Always validate on the server before processing requests or storing data.
+</Accordion>
+
+<Accordion title="Fail fast with clear errors">
+  Return validation errors immediately with HTTP 400 and descriptive messages. This helps developers debug integration issues while preventing invalid data from propagating.
+</Accordion>
+
+<Accordion title="Use allowlists, not blocklists">
+  Define valid values explicitly (like `VALID_MONTHS`) rather than trying to block invalid ones. Allowlists are more secure and easier to maintain.
+</Accordion>
+
+<Accordion title="Validate business logic, not just format">
+  Format validation (email regex, phone pattern) is not enough. Always validate against business rules: Does this plan exist? Does the price match? Is this combination allowed?
+</Accordion>
+
+<Accordion title="Log validation failures">
+  Consider logging validation failures for monitoring. Frequent failures from the same IP might indicate an attack or integration bug.
+</Accordion>
+
+## Common Attack Vectors Prevented
+
+| Attack | Prevention |
+|--------|------------|
+| **Price manipulation** | Server-side price validation against source of truth |
+| **SQL injection** | Input sanitization removes SQL metacharacters |
+| **XSS attacks** | HTML tag stripping in all string inputs |
+| **Bot spam** | Honeypot field + rate limiting |
+| **Invalid data types** | Type coercion with strict validation |
+| **Buffer overflow** | Maximum length enforcement on all strings |
+| **Enumeration attacks** | Allowlist validation for enums |
+
+## Related Documentation
+
+- [Data Sanitization](/security/data-sanitization) - Input cleaning functions
+- [Rate Limiting](/security/rate-limiting) - Request throttling configuration

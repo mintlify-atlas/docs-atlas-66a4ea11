@@ -1,0 +1,326 @@
+---
+title: 'Architecture Overview'
+description: 'High-level system architecture and design principles of Connect World'
+icon: 'sitemap'
+---
+
+<Note>
+  Connect World follows a **Domain-Driven Design (DDD)** architecture with clear separation of concerns between presentation, application, domain, and infrastructure layers.
+</Note>
+
+## System Architecture
+
+Connect World is built as a modern full-stack streaming platform using Next.js 16 with the App Router. The architecture follows clean architecture principles with well-defined boundaries between layers.
+
+<CardGroup cols={2}>
+  <Card title="Frontend Framework" icon="react">
+    Next.js 16 with App Router for server-side rendering and optimal performance
+  </Card>
+  <Card title="Backend Architecture" icon="server">
+    API Routes with DDD pattern, separating business logic from infrastructure
+  </Card>
+  <Card title="Database" icon="database">
+    MongoDB with Mongoose ODM for flexible document storage
+  </Card>
+  <Card title="External Services" icon="cloud">
+    TMDB API for content, Stripe & PayPal for payments
+  </Card>
+</CardGroup>
+
+## Architecture Layers
+
+The application is organized into four distinct layers following DDD principles:
+
+<Accordion title="Domain Layer" icon="gem">
+  The core business logic layer containing:
+  - **Entities**: `Customer`, `Order`, `Plan`
+  - **Value Objects**: `Email`, `Phone` (with validation)
+  - **Repository Interfaces**: `ICustomerRepository`, `IOrderRepository`
+  
+  This layer has no dependencies on external frameworks or infrastructure.
+  
+  **Location**: `src/domain/`
+</Accordion>
+
+<Accordion title="Application Layer" icon="gears">
+  Orchestrates business workflows through use cases:
+  - **Use Cases**: `CreateOrderUseCase`
+  - **DTOs**: `OrderDto` for data transfer between layers
+  
+  Coordinates between domain entities and infrastructure without knowing implementation details.
+  
+  **Location**: `src/application/`
+</Accordion>
+
+<Accordion title="Infrastructure Layer" icon="database">
+  Implements technical concerns:
+  - **Database Connection**: MongoDB connection management
+  - **Repository Implementations**: `MongoOrderRepository`, `MongoCustomerRepository`
+  - **Database Models**: Mongoose schemas with snake_case conventions
+  - **External Services**: TMDB API integration
+  
+  **Location**: `src/infrastructure/`
+</Accordion>
+
+<Accordion title="Presentation Layer" icon="browser">
+  User interface and API endpoints:
+  - **React Components**: Landing page sections, UI components
+  - **API Routes**: RESTful endpoints for orders, payments, content
+  - **Client Components**: Interactive elements with Framer Motion
+  
+  **Location**: `src/presentation/` and `src/app/`
+</Accordion>
+
+## Next.js App Router Structure
+
+Connect World leverages Next.js 16's App Router for optimal performance and developer experience:
+
+```plaintext
+src/app/
+├── api/                    # API route handlers
+│   ├── orders/            # Order management
+│   ├── paypal/            # PayPal payment integration
+│   │   ├── create-order/
+│   │   └── capture-order/
+│   ├── stripe/            # Stripe payment integration
+│   └── tmdb/              # Content API proxy
+├── layout.tsx             # Root layout with metadata
+└── page.tsx               # Homepage entry point
+```
+
+### API Routes Organization
+
+All API routes follow Next.js conventions and implement:
+- **Rate limiting** to prevent abuse
+- **Input sanitization** for security
+- **Honeypot fields** for bot detection
+- **Validation** against business rules
+
+<CodeGroup>
+```typescript src/app/api/orders/route.ts
+export async function POST(req: NextRequest) {
+  // Rate limiting
+  const ip = getClientIp(req);
+  if (!checkRateLimit(`orders:${ip}`, 5, 10 * 60 * 1000)) {
+    return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+  }
+
+  // Dependency injection
+  const customerRepo = new MongoCustomerRepository();
+  const orderRepo = new MongoOrderRepository();
+  const useCase = new CreateOrderUseCase(customerRepo, orderRepo);
+
+  // Execute use case
+  const result = await useCase.execute(dto);
+  return NextResponse.json(result, { status: 201 });
+}
+```
+</CodeGroup>
+
+## Database Layer
+
+Connect World uses **MongoDB** with Mongoose ODM for data persistence:
+
+<Card title="Database Design" icon="diagram-project">
+  - **Collections**: `customers`, `orders`
+  - **Schema Validation**: Mongoose schemas with TypeScript types
+  - **Naming Convention**: snake_case in database, camelCase in domain
+  - **Connection Management**: Cached connection for serverless environments
+</Card>
+
+### Data Mapping Strategy
+
+The infrastructure layer handles conversion between domain entities (camelCase) and database documents (snake_case):
+
+```typescript
+// Domain Entity (camelCase)
+interface Order {
+  customerId: string;
+  paymentMethod: string;
+  activationDate: Date;
+}
+
+// Database Document (snake_case)
+interface OrderDbDoc {
+  customer_id: string;
+  payment_method: string;
+  activation_date: Date;
+}
+```
+
+**See**: `src/infrastructure/repositories/MongoOrderRepository.ts:6`
+
+## External Integrations
+
+<CardGroup cols={2}>
+  <Card title="TMDB API" icon="film">
+    **Purpose**: Content catalog (movies, TV shows)
+    
+    **Endpoints**:
+    - Trending content
+    - Now playing movies
+    - Top-rated series
+    
+    **Location**: `src/infrastructure/external/tmdbService.ts`
+  </Card>
+  
+  <Card title="Stripe" icon="stripe">
+    **Purpose**: Primary payment processor
+    
+    **Features**:
+    - One-time payments
+    - Subscription handling
+    - Webhook integration
+    
+    **Location**: `src/app/api/stripe/route.ts`
+  </Card>
+  
+  <Card title="PayPal" icon="paypal">
+    **Purpose**: Alternative payment method
+    
+    **Flow**:
+    1. Create order
+    2. Customer approval
+    3. Capture payment
+    
+    **Location**: `src/app/api/paypal/`
+  </Card>
+  
+  <Card title="Mongoose" icon="leaf">
+    **Purpose**: MongoDB ODM
+    
+    **Features**:
+    - Schema validation
+    - Type safety
+    - Query building
+    
+    **Location**: `src/infrastructure/database/`
+  </Card>
+</CardGroup>
+
+## Security & Validation
+
+Connect World implements multiple security layers:
+
+<Accordion title="Input Sanitization">
+  All user inputs are sanitized using dedicated utility functions:
+  - `sanitizeString`: Prevents XSS attacks
+  - `sanitizeEmail`: Validates and normalizes email addresses
+  - `sanitizePhone`: Formats and validates phone numbers
+  - `sanitizeNumber`: Enforces numeric ranges
+  - `sanitizeEnum`: Validates against allowed values
+  
+  **Location**: `src/lib/sanitize.ts`
+</Accordion>
+
+<Accordion title="Rate Limiting">
+  IP-based rate limiting prevents abuse:
+  - 5 orders per IP per 10 minutes
+  - Configurable time windows and limits
+  - In-memory cache for serverless compatibility
+  
+  **Location**: `src/lib/rateLimiter.ts`
+</Accordion>
+
+<Accordion title="Honeypot Fields">
+  Hidden form fields catch automated bots:
+  - Field `_hp` invisible to human users
+  - Bots fill all fields and get silently rejected
+  - Returns fake success to avoid aggressive retries
+  
+  **Implementation**: `src/app/api/orders/route.ts:33`
+</Accordion>
+
+<Accordion title="Business Rule Validation">
+  Server-side validation ensures data integrity:
+  - Plan existence verification
+  - Price manipulation prevention
+  - Device count validation
+  - Subscription duration limits
+  
+  **Implementation**: `src/app/api/orders/route.ts:53`
+</Accordion>
+
+## Technology Stack
+
+<CodeGroup>
+```json package.json
+{
+  "dependencies": {
+    "next": "16.1.6",
+    "react": "19.2.3",
+    "mongoose": "^9.2.4",
+    "stripe": "^20.4.1",
+    "@paypal/react-paypal-js": "^9.0.1",
+    "axios": "^1.13.6",
+    "framer-motion": "^12.35.1",
+    "tailwindcss": "^4"
+  }
+}
+```
+</CodeGroup>
+
+<CardGroup cols={3}>
+  <Card title="Frontend" icon="react">
+    - React 19
+    - Next.js 16
+    - Tailwind CSS v4
+    - Framer Motion
+  </Card>
+  
+  <Card title="Backend" icon="node">
+    - Next.js API Routes
+    - TypeScript 5
+    - Mongoose ODM
+    - Axios HTTP client
+  </Card>
+  
+  <Card title="Infrastructure" icon="cloud">
+    - MongoDB database
+    - Vercel hosting
+    - TMDB API
+    - Stripe & PayPal
+  </Card>
+</CardGroup>
+
+## Development Principles
+
+<Note>
+  The architecture prioritizes **maintainability**, **testability**, and **scalability** through clear separation of concerns and dependency inversion.
+</Note>
+
+### Key Principles
+
+1. **Domain-Driven Design**: Business logic isolated in domain layer
+2. **Dependency Injection**: Components receive dependencies, don't create them
+3. **Interface Segregation**: Small, focused interfaces (repositories)
+4. **Single Responsibility**: Each module has one reason to change
+5. **Type Safety**: Full TypeScript coverage with strict mode
+
+### Code Organization Benefits
+
+- **Testability**: Domain logic can be tested without database or HTTP
+- **Flexibility**: Easy to swap MongoDB for another database
+- **Clarity**: Each layer has a clear purpose and boundaries
+- **Scalability**: New features follow established patterns
+- **Maintainability**: Changes are localized to specific layers
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Domain-Driven Design" icon="gem" href="/architecture/domain-driven-design">
+    Deep dive into DDD layers and patterns
+  </Card>
+  
+  <Card title="Project Structure" icon="folder-tree" href="/architecture/project-structure">
+    Complete directory tree and file organization
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Detailed API endpoint documentation
+  </Card>
+  
+  <Card title="Development Guide" icon="hammer" href="/architecture/overview">
+    Setup and development workflow
+  </Card>
+</CardGroup>

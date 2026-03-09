@@ -1,0 +1,402 @@
+---
+title: 'TMDB Integration'
+description: 'Integrate The Movie Database (TMDB) API for content discovery'
+icon: 'film'
+---
+
+## Overview
+
+Connect World uses The Movie Database (TMDB) API to fetch trending movies and TV shows, display content catalogs, and provide rich metadata for the streaming platform. TMDB provides comprehensive movie and TV show data including posters, ratings, and descriptions.
+
+## Prerequisites
+
+- TMDB account ([sign up here](https://www.themoviedb.org/signup))
+- TMDB API key (v3)
+
+## Environment Configuration
+
+<Steps>
+  <Step title="Create TMDB API Key">
+    1. Log in to [TMDB](https://www.themoviedb.org/)
+    2. Go to **Settings** → **API**
+    3. Request an API key (choose "Developer" option)
+    4. Fill out the application form
+    5. Copy your **API Key (v3 auth)**
+  </Step>
+
+  <Step title="Add environment variable">
+    Add this variable to your `.env.local` file:
+
+    ```bash .env.local
+    NEXT_PUBLIC_TMDB_API_KEY=your_api_key_here
+    ```
+
+    <Info>
+      The `NEXT_PUBLIC_` prefix makes this variable accessible on the client-side, which is safe for TMDB API keys as they're designed for public use.
+    </Info>
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    npm install axios
+    ```
+  </Step>
+</Steps>
+
+## Service Implementation
+
+The TMDB service provides a centralized interface for all TMDB API interactions.
+
+**File:** `src/infrastructure/external/tmdbService.ts`
+
+<CodeGroup>
+```typescript tmdbService.ts
+import axios from "axios";
+
+const TMDB_API_KEY = process.env.NEXT_PUBLIC_TMDB_API_KEY;
+const BASE_URL = "https://api.themoviedb.org/3";
+
+export interface TmdbMovie {
+  id: number;
+  title?: string;
+  name?: string;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  overview: string;
+  vote_average: number;
+  release_date?: string;
+  first_air_date?: string;
+  genre_ids: number[];
+  media_type?: string;
+}
+
+export interface TmdbResponse {
+  results: TmdbMovie[];
+}
+
+const tmdbClient = axios.create({
+  baseURL: BASE_URL,
+  params: { api_key: TMDB_API_KEY, language: "es-ES" },
+});
+
+export async function getTrendingAll(
+  timeWindow: "day" | "week" = "week"
+): Promise<TmdbMovie[]> {
+  const { data } = await tmdbClient.get<TmdbResponse>(
+    `/trending/all/${timeWindow}`
+  );
+  return data.results.slice(0, 10);
+}
+
+export async function getNowPlayingMovies(): Promise<TmdbMovie[]> {
+  const { data } = await tmdbClient.get<TmdbResponse>("/movie/now_playing");
+  return data.results.slice(0, 10);
+}
+
+export async function getTopRatedSeries(): Promise<TmdbMovie[]> {
+  const { data } = await tmdbClient.get<TmdbResponse>("/tv/top_rated");
+  return data.results.slice(0, 5);
+}
+
+export function getPosterUrl(path: string | null, size = "w500"): string {
+  if (!path) return "/images/placeholder.jpg";
+  return `https://image.tmdb.org/t/p/${size}${path}`;
+}
+```
+</CodeGroup>
+
+## API Functions
+
+### getTrendingAll
+
+Fetches trending movies and TV shows for a specified time window.
+
+```typescript
+const trending = await getTrendingAll("week");
+// Returns top 10 trending items from the past week
+```
+
+**Parameters:**
+- `timeWindow`: `"day"` or `"week"` (default: `"week"`)
+
+**Returns:** Array of `TmdbMovie` objects
+
+### getNowPlayingMovies
+
+Retrieves movies currently playing in theaters.
+
+```typescript
+const nowPlaying = await getNowPlayingMovies();
+// Returns top 10 now playing movies
+```
+
+**Returns:** Array of `TmdbMovie` objects
+
+### getTopRatedSeries
+
+Fetches the highest-rated TV series.
+
+```typescript
+const topSeries = await getTopRatedSeries();
+// Returns top 5 rated TV series
+```
+
+**Returns:** Array of `TmdbMovie` objects
+
+### getPosterUrl
+
+Generates the full URL for movie/TV posters and backdrops.
+
+```typescript
+const posterUrl = getPosterUrl(movie.poster_path, "w500");
+// Returns: "https://image.tmdb.org/t/p/w500/abc123.jpg"
+```
+
+**Parameters:**
+- `path`: The poster path from TMDB (e.g., `/abc123.jpg`)
+- `size`: Image size (default: `"w500"`)
+
+**Available sizes:**
+- Posters: `"w92"`, `"w154"`, `"w185"`, `"w342"`, `"w500"`, `"w780"`, `"original"`
+- Backdrops: `"w300"`, `"w780"`, `"w1280"`, `"original"`
+
+## Usage Examples
+
+### Server Component (Next.js)
+
+Fetch trending content on the server for optimal performance.
+
+**File:** `src/app/page.tsx`
+
+```tsx page.tsx
+import { getTrendingAll, TmdbMovie } from "@/infrastructure/external/tmdbService";
+import { LandingClient } from "@/presentation/components/LandingClient";
+
+export const revalidate = 3600; // Revalidate every hour
+
+export default async function HomePage() {
+  let trending: TmdbMovie[] = [];
+  try {
+    trending = await getTrendingAll("week");
+  } catch {
+    // TMDB key not configured yet — renders with empty catalog
+  }
+
+  return <LandingClient trending={trending} />;
+}
+```
+
+<Note>
+  The `revalidate` export enables Next.js ISR (Incremental Static Regeneration), caching the TMDB data for 1 hour to reduce API calls.
+</Note>
+
+### Display Content Catalog
+
+Render movies and TV shows with posters and metadata.
+
+```tsx CatalogSection.tsx
+import { TmdbMovie, getPosterUrl } from "@/infrastructure/external/tmdbService";
+
+interface CatalogProps {
+  trending: TmdbMovie[];
+}
+
+export function CatalogSection({ trending }: CatalogProps) {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+      {trending.map((item) => (
+        <div key={item.id} className="relative group">
+          <img
+            src={getPosterUrl(item.poster_path)}
+            alt={item.title || item.name}
+            className="rounded-lg w-full"
+          />
+          <div className="mt-2">
+            <h3 className="font-semibold">
+              {item.title || item.name}
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-yellow-500">★</span>
+              <span>{item.vote_average.toFixed(1)}</span>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+```
+
+### Handle Missing API Key
+
+Gracefully handle missing TMDB configuration.
+
+```typescript
+export default async function HomePage() {
+  let trending: TmdbMovie[] = [];
+  
+  try {
+    trending = await getTrendingAll("week");
+  } catch (error) {
+    console.error("TMDB API error:", error);
+    // Continue rendering with empty catalog
+    // No crash, degraded experience
+  }
+
+  return <LandingClient trending={trending} />;
+}
+```
+
+## TypeScript Types
+
+### TmdbMovie Interface
+
+```typescript
+export interface TmdbMovie {
+  id: number;                    // Unique TMDB ID
+  title?: string;                // Movie title
+  name?: string;                 // TV show name
+  poster_path: string | null;    // Poster image path
+  backdrop_path: string | null;  // Backdrop image path
+  overview: string;              // Description/synopsis
+  vote_average: number;          // Rating (0-10)
+  release_date?: string;         // Movie release date
+  first_air_date?: string;       // TV show first air date
+  genre_ids: number[];           // Array of genre IDs
+  media_type?: string;           // "movie" or "tv"
+}
+```
+
+### TmdbResponse Interface
+
+```typescript
+export interface TmdbResponse {
+  results: TmdbMovie[];  // Array of movies/TV shows
+}
+```
+
+## API Rate Limits
+
+TMDB enforces rate limits on API requests:
+
+- **40 requests per 10 seconds** per IP address
+- Exceeding the limit returns `429 Too Many Requests`
+
+<Warning>
+  **Optimization Tips:**
+  - Use Next.js ISR/SSG to cache results
+  - Avoid calling TMDB on every page load
+  - Implement request caching for frequently accessed data
+  - Use the `revalidate` option to control cache duration
+</Warning>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Cache Responses" icon="database">
+    Use Next.js ISR or a caching layer to minimize API calls and improve performance.
+  </Card>
+  
+  <Card title="Handle Errors Gracefully" icon="circle-exclamation">
+    Always catch TMDB errors and provide fallback content for better UX.
+  </Card>
+  
+  <Card title="Optimize Images" icon="image">
+    Use appropriate image sizes. Don't load `original` when `w500` suffices.
+  </Card>
+  
+  <Card title="Localize Content" icon="language">
+    Set the `language` parameter in the axios client to localize results.
+  </Card>
+</CardGroup>
+
+## Language Configuration
+
+Change the language for TMDB responses:
+
+```typescript
+const tmdbClient = axios.create({
+  baseURL: BASE_URL,
+  params: { 
+    api_key: TMDB_API_KEY, 
+    language: "en-US" // Change to your desired locale
+  },
+});
+```
+
+**Supported languages:** `en-US`, `es-ES`, `fr-FR`, `de-DE`, etc.
+
+## Advanced Features
+
+### Search Movies
+
+Add a search function to your TMDB service:
+
+```typescript
+export async function searchMovies(query: string): Promise<TmdbMovie[]> {
+  const { data } = await tmdbClient.get<TmdbResponse>("/search/multi", {
+    params: { query },
+  });
+  return data.results;
+}
+```
+
+### Get Movie Details
+
+Fetch detailed information about a specific movie:
+
+```typescript
+export async function getMovieDetails(movieId: number) {
+  const { data } = await tmdbClient.get(`/movie/${movieId}`);
+  return data;
+}
+```
+
+### Get Genre List
+
+Retrieve the list of official genres:
+
+```typescript
+export async function getGenres() {
+  const { data } = await tmdbClient.get("/genre/movie/list");
+  return data.genres;
+}
+```
+
+## Additional Resources
+
+- [TMDB API Documentation](https://developers.themoviedb.org/3/getting-started/introduction)
+- [TMDB API Reference](https://developers.themoviedb.org/3)
+- [Image Configuration](https://developers.themoviedb.org/3/getting-started/images)
+- [API Status & Limits](https://www.themoviedb.org/settings/api)
+
+## Troubleshooting
+
+### Common Issues
+
+**"Invalid API key"**
+- Verify your API key is correct in `.env.local`
+- Ensure the environment variable name matches: `NEXT_PUBLIC_TMDB_API_KEY`
+- Restart your development server after adding the key
+
+**"Resource not found"**
+- Check the API endpoint URL is correct
+- Verify the movie/show ID exists in TMDB
+- Ensure language parameter is valid
+
+**"Rate limit exceeded"**
+- Implement caching to reduce API calls
+- Use Next.js `revalidate` to cache responses
+- Wait before retrying (10 seconds for rate limit reset)
+
+**Empty poster images**
+- Some content may not have posters available
+- Always check if `poster_path` is `null` before using `getPosterUrl()`
+- Provide fallback placeholder images
+
+<Info>
+  **Debugging Tips:**
+  - Log the full error response for detailed TMDB error messages
+  - Use the TMDB API explorer to test endpoints: https://developers.themoviedb.org/3
+  - Check your API usage in the TMDB dashboard
+</Info>

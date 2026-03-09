@@ -1,0 +1,402 @@
+---
+title: 'PayPal Integration'
+description: 'Set up PayPal payment processing for subscription orders'
+icon: 'paypal'
+---
+
+## Overview
+
+Connect World integrates PayPal as an alternative payment method for users who prefer not to use credit cards. The implementation uses PayPal's Orders API v2 for creating and capturing payments.
+
+## Prerequisites
+
+- PayPal Business account ([sign up here](https://www.paypal.com/us/webapps/mpp/account-selection))
+- PayPal REST API credentials
+- Next.js application with API routes
+
+## Environment Configuration
+
+<Steps>
+  <Step title="Create PayPal App">
+    1. Log in to the [PayPal Developer Dashboard](https://developer.paypal.com/dashboard/)
+    2. Navigate to **Apps & Credentials**
+    3. Create a new app or use an existing one
+    4. Copy your **Client ID** and **Secret**
+  </Step>
+
+  <Step title="Configure environment variables">
+    Add these variables to your `.env.local` file:
+
+    ```bash .env.local
+    NEXT_PUBLIC_PAYPAL_CLIENT_ID=your_client_id_here
+    PAYPAL_CLIENT_SECRET=your_client_secret_here
+    PAYPAL_BASE_URL=https://api-m.sandbox.paypal.com
+    ```
+
+    <Info>
+      **Sandbox vs Production:**
+      - Sandbox: `https://api-m.sandbox.paypal.com`
+      - Production: `https://api-m.paypal.com`
+    </Info>
+  </Step>
+
+  <Step title="Install PayPal SDK">
+    ```bash
+    npm install @paypal/react-paypal-js axios
+    ```
+  </Step>
+</Steps>
+
+## Server-Side Implementation
+
+### Authentication Helper
+
+PayPal requires OAuth 2.0 authentication for API requests.
+
+```typescript Authentication
+async function getPayPalAccessToken(): Promise<string> {
+  const credentials = Buffer.from(
+    `${process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID}:${process.env.PAYPAL_CLIENT_SECRET}`
+  ).toString("base64");
+
+  const { data } = await axios.post(
+    `${PAYPAL_BASE}/v1/oauth2/token`,
+    "grant_type=client_credentials",
+    {
+      headers: {
+        Authorization: `Basic ${credentials}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    }
+  );
+
+  return data.access_token;
+}
+```
+
+### Create Order Endpoint
+
+The create-order endpoint initializes a PayPal order with validated plan details.
+
+**File:** `src/app/api/paypal/create-order/route.ts`
+
+<CodeGroup>
+```typescript create-order/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+import { checkRateLimit, getClientIp } from "@/lib/rateLimiter";
+import { sanitizeNumber, sanitizeString } from "@/lib/sanitize";
+import { PLANS } from "@/domain/entities/Plan";
+
+const PAYPAL_BASE = process.env.PAYPAL_BASE_URL ?? "https://api-m.sandbox.paypal.com";
+const VALID_MONTHS = [1, 2, 3, 6, 12] as const;
+
+export async function POST(req: NextRequest) {
+  // Rate limit: 10 PayPal order creations per IP per 15 minutes
+  const ip = getClientIp(req);
+  if (!checkRateLimit(`paypal-create:${ip}`, 10, 15 * 60 * 1000)) {
+    return NextResponse.json(
+      { error: "Too many requests. Try again in a few minutes." },
+      { status: 429 }
+    );
+  }
+
+  try {
+    const body = await req.json();
+
+    const planId = sanitizeString(body.planId, 50);
+    const months = sanitizeNumber(body.months, 1, 12);
+    const amount = sanitizeNumber(body.amount, 1, 10000);
+
+    if (!planId || months === null || amount === null) {
+      return NextResponse.json({ error: "Invalid data." }, { status: 400 });
+    }
+
+    const plan = PLANS.find((p) => p.id === planId);
+    if (!plan) {
+      return NextResponse.json({ error: "Invalid plan." }, { status: 400 });
+    }
+    if (!(VALID_MONTHS as readonly number[]).includes(months)) {
+      return NextResponse.json({ error: "Invalid duration." }, { status: 400 });
+    }
+
+    // Prevent price tampering
+    const expectedPrice = plan.prices.find((p) => p.months === months)?.price;
+    if (expectedPrice === undefined || Math.abs(amount - expectedPrice) > 0.01) {
+      return NextResponse.json({ error: "Invalid amount." }, { status: 400 });
+    }
+
+    const accessToken = await getPayPalAccessToken();
+
+    const orderPayload = {
+      intent: "CAPTURE",
+      purchase_units: [
+        {
+          amount: { 
+            currency_code: "USD", 
+            value: String(Number(amount).toFixed(2)) 
+          },
+          description: `Connect World Plan ${planId} ${months}mo`,
+        },
+      ],
+    };
+
+    const { data } = await axios.post(
+      `${PAYPAL_BASE}/v2/checkout/orders`,
+      orderPayload,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("[PayPal create-order] created:", data.id, "status:", data.status);
+    return NextResponse.json({ id: data.id });
+  } catch (error: unknown) {
+    const axiosError = error as { response?: { data?: unknown; status?: number } };
+    const paypalDetail = axiosError?.response?.data;
+    console.error("[PayPal create-order]", paypalDetail ?? error);
+    const message = paypalDetail
+      ? JSON.stringify(paypalDetail)
+      : error instanceof Error
+      ? error.message
+      : "Failed to create PayPal order";
+    return NextResponse.json(
+      { error: message }, 
+      { status: axiosError?.response?.status ?? 500 }
+    );
+  }
+}
+```
+</CodeGroup>
+
+### Capture Order Endpoint
+
+After the user approves the payment, capture the funds.
+
+**File:** `src/app/api/paypal/capture-order/route.ts`
+
+<CodeGroup>
+```typescript capture-order/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import axios from "axios";
+
+const PAYPAL_BASE = process.env.PAYPAL_BASE_URL ?? "https://api-m.sandbox.paypal.com";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { orderId } = await req.json();
+
+    const accessToken = await getPayPalAccessToken();
+
+    const { data } = await axios.post(
+      `${PAYPAL_BASE}/v2/checkout/orders/${orderId}/capture`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    return NextResponse.json({ id: data.id, status: data.status });
+  } catch (error: unknown) {
+    const axiosError = error as { response?: { data?: unknown; status?: number } };
+    const paypalDetail = axiosError?.response?.data;
+    console.error("[PayPal capture-order]", paypalDetail ?? error);
+    const message = paypalDetail
+      ? JSON.stringify(paypalDetail)
+      : error instanceof Error
+      ? error.message
+      : "Failed to capture PayPal order";
+    return NextResponse.json(
+      { error: message }, 
+      { status: axiosError?.response?.status ?? 500 }
+    );
+  }
+}
+```
+</CodeGroup>
+
+## Client-Side Implementation
+
+### Initialize PayPal Provider
+
+Wrap your checkout component with the PayPal Script Provider.
+
+```tsx CheckoutModal.tsx
+import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+
+<PayPalScriptProvider 
+  options={{ 
+    clientId: process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID!, 
+    currency: "USD", 
+    intent: "capture" 
+  }}
+>
+  <CheckoutForm />
+</PayPalScriptProvider>
+```
+
+### PayPal Buttons Implementation
+
+```tsx CheckoutForm.tsx
+const handlePayPalApprove = async (data: { orderID: string }) => {
+  setLoading(true);
+  console.log("[PayPal onApprove] orderID:", data.orderID);
+  
+  try {
+    // Capture the payment
+    const { data: capture } = await axios.post(
+      "/api/paypal/capture-order", 
+      { orderId: data.orderID }
+    );
+    console.log("[PayPal capture]", capture);
+
+    // Create order record
+    const { data: order } = await axios.post("/api/orders", {
+      name: form.name,
+      email: form.email,
+      phone: fullPhone,
+      planId: plan.id,
+      devices: plan.devices,
+      months,
+      amount: price,
+      paymentMethod: "paypal",
+      paymentReceiptId: capture.id,
+    });
+
+    onPaymentSuccess({
+      orderId: order.orderId,
+      expirationDate: order.expirationDate,
+      // ... other order details
+    });
+  } catch (err: unknown) {
+    setError(err instanceof Error ? err.message : "PayPal payment failed");
+  } finally {
+    setLoading(false);
+  }
+};
+
+// Render PayPal buttons
+<PayPalButtons
+  style={{ layout: "vertical", color: "blue", shape: "pill", label: "pay" }}
+  forceReRender={[price, plan.id, months]}
+  createOrder={async () => {
+    const { data } = await axios.post("/api/paypal/create-order", {
+      amount: price,
+      planId: plan.id,
+      months
+    });
+    if (data.error || !data.id) {
+      throw new Error(data.error ?? "Could not create PayPal order");
+    }
+    return data.id;
+  }}
+  onApprove={handlePayPalApprove}
+  onError={(err) => {
+    console.error("[PayPal onError]", err);
+    setError(`PayPal Error: ${(err as { message?: string })?.message ?? JSON.stringify(err)}`);
+  }}
+  onCancel={() => setError(null)}
+/>
+```
+
+## Payment Flow
+
+<Steps>
+  <Step title="User clicks PayPal button">
+    The PayPal SDK calls the `createOrder` callback
+  </Step>
+
+  <Step title="Server creates PayPal order">
+    `/api/paypal/create-order` validates the plan and creates an order via PayPal API
+  </Step>
+
+  <Step title="User approves payment">
+    User logs into PayPal and approves the payment in the PayPal popup
+  </Step>
+
+  <Step title="Client captures payment">
+    The `onApprove` callback triggers `/api/paypal/capture-order` to finalize the payment
+  </Step>
+
+  <Step title="Create order record">
+    After successful capture, create an order record with the PayPal order ID as receipt
+  </Step>
+</Steps>
+
+## Testing
+
+### Sandbox Accounts
+
+1. Go to [PayPal Sandbox](https://developer.paypal.com/dashboard/accounts)
+2. Create a **Personal** account (buyer) for testing
+3. Use these credentials to test payments
+
+<Note>
+  Sandbox accounts have fake money pre-loaded. No real transactions occur during testing.
+</Note>
+
+### Test Credentials
+
+Create test buyer accounts in the sandbox with these details:
+- Email: `buyer@personal.example.com`
+- Password: Set in the sandbox dashboard
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Secure Credentials" icon="lock">
+    Keep your client secret server-side only. Never expose it in client code.
+  </Card>
+  
+  <Card title="Validate Server-Side" icon="shield-check">
+    Always validate prices and plan details on the server before creating orders.
+  </Card>
+  
+  <Card title="Handle Errors" icon="bug">
+    PayPal errors include detailed response data. Log these for debugging.
+  </Card>
+  
+  <Card title="Use Webhooks" icon="webhook">
+    For production, implement PayPal webhooks to handle asynchronous payment events.
+  </Card>
+</CardGroup>
+
+## Additional Resources
+
+- [PayPal Orders API v2](https://developer.paypal.com/docs/api/orders/v2/)
+- [PayPal React SDK](https://www.npmjs.com/package/@paypal/react-paypal-js)
+- [PayPal Integration Guide](https://developer.paypal.com/docs/checkout/standard/integrate/)
+- [PayPal Sandbox Testing](https://developer.paypal.com/tools/sandbox/)
+
+## Troubleshooting
+
+### Common Issues
+
+**"Authentication failed"**
+- Verify your client ID and secret are correct
+- Ensure credentials match the environment (sandbox vs production)
+- Check the `PAYPAL_BASE_URL` matches your credentials type
+
+**"Order could not be created"**
+- Verify the amount format is a string with 2 decimal places
+- Check that currency code is supported (USD, EUR, etc.)
+- Review server logs for detailed PayPal error responses
+
+**"INSTRUMENT_DECLINED"**
+- In sandbox: Use a test buyer account with sufficient balance
+- In production: The buyer's payment method was declined
+
+<Warning>
+  **Production Checklist:**
+  - Switch to production credentials
+  - Update `PAYPAL_BASE_URL` to `https://api-m.paypal.com`
+  - Remove debug logging
+  - Implement webhook verification
+  - Test with real PayPal accounts
+</Warning>

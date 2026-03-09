@@ -1,0 +1,263 @@
+---
+title: 'Subscription Plans'
+description: 'Flexible subscription tiers designed to meet different streaming needs'
+icon: 'credit-card'
+---
+
+## Overview
+
+Connect World offers three subscription tiers: **Basic**, **Standard**, and **Premium**. Each plan provides unlimited access to our content catalog with varying device limits, streaming quality, and additional features.
+
+<CardGroup cols={3}>
+  <Card title="Basic" icon="tv">
+    Perfect for individual users
+    
+    1 device • HD & Full HD
+  </Card>
+  <Card title="Standard" icon="users">
+    Most popular for families
+    
+    2 devices • HD & Full HD
+  </Card>
+  <Card title="Premium" icon="star">
+    Ultimate experience
+    
+    3 devices • 4K Ultra HD
+  </Card>
+</CardGroup>
+
+## Plan Structure
+
+All subscription plans are defined in the `Plan` entity, which includes device limits, pricing tiers, and feature sets.
+
+### Plan Interface
+
+```typescript
+export interface Plan {
+  id: string;
+  devices: DeviceCount;
+  name: string;
+  description: string;
+  prices: PlanPrice[];
+  features: string[];
+  popular?: boolean;
+}
+```
+
+Source: `src/domain/entities/Plan.ts:10-18`
+
+### Device Limits
+
+Connect World supports 1, 2, or 3 simultaneous devices per subscription:
+
+```typescript
+export type DeviceCount = 1 | 2 | 3;
+```
+
+Source: `src/domain/entities/Plan.ts:1`
+
+## Subscription Tiers
+
+<Tabs>
+  <Tab title="Basic Plan">
+    ### Basic Plan (1 Device)
+    
+    The Basic plan is perfect for individual users who want to enjoy Connect World on a single device.
+    
+    **Features:**
+    - 1 dispositivo simultáneo
+    - HD & Full HD streaming quality
+    - Acceso ilimitado a catálogo
+    - Soporte 24/7
+    
+    **Pricing:**
+    - 1 month: $10
+    - 2 months: $20
+    - 3 months: $30
+    - 6 months: $60
+    - 12 months: $120
+    
+    Source: `src/domain/entities/Plan.ts:34-39, 21`
+  </Tab>
+  
+  <Tab title="Standard Plan">
+    ### Standard Plan (2 Devices)
+    
+    <Note>
+      **Most Popular Choice** - The Standard plan is marked as the most popular option and is ideal for couples or small families.
+    </Note>
+    
+    **Features:**
+    - 2 dispositivos simultáneos
+    - HD & Full HD streaming quality
+    - Acceso ilimitado a catálogo
+    - Perfiles personalizados
+    - Soporte 24/7
+    
+    **Pricing:**
+    - 1 month: $15
+    - 2 months: $25
+    - 3 months: $35
+    - 6 months: $70
+    - 12 months: $140
+    
+    Source: `src/domain/entities/Plan.ts:40-46, 22, 70`
+  </Tab>
+  
+  <Tab title="Premium Plan">
+    ### Premium Plan (3 Devices)
+    
+    The Premium plan offers the ultimate streaming experience with 4K quality and offline downloads.
+    
+    **Features:**
+    - 3 dispositivos simultáneos
+    - **4K Ultra HD** streaming quality
+    - Acceso ilimitado a catálogo
+    - Perfiles personalizados
+    - **Descargas offline**
+    - **Soporte prioritario 24/7**
+    
+    **Pricing:**
+    - 1 month: $15
+    - 2 months: $30
+    - 3 months: $45
+    - 6 months: $80
+    - 12 months: $149
+    
+    Source: `src/domain/entities/Plan.ts:47-54, 23`
+  </Tab>
+</Tabs>
+
+## Duration Options
+
+Subscriptions can be purchased for flexible durations:
+
+```typescript
+export type PlanDuration = 1 | 2 | 3 | 6 | 12;
+```
+
+Source: `src/domain/entities/Plan.ts:2`
+
+### Pricing Structure
+
+The pricing matrix is defined per device count and duration:
+
+```typescript
+const PLAN_PRICES: Record<DeviceCount, Record<PlanDuration, number>> = {
+  1: { 1: 10, 2: 20, 3: 30, 6: 60, 12: 120 },
+  2: { 1: 15, 2: 25, 3: 35, 6: 70, 12: 140 },
+  3: { 1: 15, 2: 30, 3: 45, 6: 80, 12: 149 },
+};
+```
+
+Source: `src/domain/entities/Plan.ts:20-24`
+
+<Note>
+  Longer subscription durations offer better value per month. For example, the Premium plan costs $15/month for 1 month but only $12.42/month for a 12-month subscription.
+</Note>
+
+## Plan Creation
+
+Plans are dynamically generated using the `createPlan` factory function:
+
+```typescript
+export function createPlan(devices: DeviceCount): Plan {
+  const prices: PlanPrice[] = ([1, 2, 3, 6, 12] as PlanDuration[]).map((months) => ({
+    months,
+    price: PLAN_PRICES[devices][months],
+    label: months === 1 ? "1 mes" : `${months} meses`,
+  }));
+
+  const names: Record<DeviceCount, string> = {
+    1: "Basic",
+    2: "Standard",
+    3: "Premium",
+  };
+
+  return {
+    id: `plan-${devices}`,
+    devices,
+    name: names[devices],
+    description: `Disfruta Connect World en ${devices} dispositivo${devices > 1 ? "s" : ""}`,
+    prices,
+    features: features[devices],
+    popular: devices === 2,
+  };
+}
+```
+
+Source: `src/domain/entities/Plan.ts:26-72`
+
+## Available Plans
+
+All three plans are exported as a constant array:
+
+```typescript
+export const PLANS: Plan[] = [
+  createPlan(1),
+  createPlan(2),
+  createPlan(3),
+];
+```
+
+Source: `src/domain/entities/Plan.ts:74-78`
+
+## Price Interface
+
+Each plan contains an array of price options with duration labels:
+
+```typescript
+export interface PlanPrice {
+  months: PlanDuration;
+  price: number;
+  label: string;
+}
+```
+
+Source: `src/domain/entities/Plan.ts:4-8`
+
+<Accordion title="Example Plan Object">
+  ```json
+  {
+    "id": "plan-2",
+    "devices": 2,
+    "name": "Standard",
+    "description": "Disfruta Connect World en 2 dispositivos",
+    "popular": true,
+    "prices": [
+      { "months": 1, "price": 15, "label": "1 mes" },
+      { "months": 2, "price": 25, "label": "2 meses" },
+      { "months": 3, "price": 35, "label": "3 meses" },
+      { "months": 6, "price": 70, "label": "6 meses" },
+      { "months": 12, "price": 140, "label": "12 meses" }
+    ],
+    "features": [
+      "2 dispositivos simultáneos",
+      "HD & Full HD",
+      "Acceso ilimitado a catálogo",
+      "Perfiles personalizados",
+      "Soporte 24/7"
+    ]
+  }
+  ```
+</Accordion>
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Plan Selection" icon="check">
+    - Standard plan is marked as "popular" to guide user choice
+    - Device count directly determines feature availability
+    - Longer durations provide better value
+  </Card>
+  <Card title="Feature Differentiation" icon="layer-group">
+    - 4K Ultra HD exclusive to Premium
+    - Offline downloads only on Premium
+    - Priority support on Premium
+    - Custom profiles on Standard and Premium
+  </Card>
+</CardGroup>
+
+<Warning>
+  All plan validations occur server-side during payment processing to prevent price tampering. The client cannot modify pricing or features.
+</Warning>
