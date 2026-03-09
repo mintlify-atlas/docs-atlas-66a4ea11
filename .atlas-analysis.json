@@ -1,0 +1,110 @@
+{
+  "projectType": "saas",
+  "projectName": "Connect World",
+  "projectDescription": "A streaming service platform with multi-tier subscriptions, payment processing, and integrated content catalog.",
+  "theme": "almond",
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#070707",
+  "darkColor": "#c4c4c4",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/subscription-plans",
+              "features/payment-processing",
+              "features/content-catalog",
+              "features/order-management"
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/overview",
+              "architecture/domain-driven-design",
+              "architecture/project-structure"
+            ]
+          },
+          {
+            "group": "Integrations",
+            "pages": [
+              "integrations/stripe",
+              "integrations/paypal",
+              "integrations/tmdb"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "security/rate-limiting",
+              "security/validation",
+              "security/data-sanitization"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/overview",
+              "api/orders",
+              "api/stripe",
+              "api/paypal",
+              "api/tmdb"
+            ]
+          },
+          {
+            "group": "Domain",
+            "pages": [
+              "api/domain/entities",
+              "api/domain/value-objects",
+              "api/domain/repositories"
+            ]
+          },
+          {
+            "group": "Application Layer",
+            "pages": [
+              "api/application/use-cases",
+              "api/application/dtos"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-tier subscription plans (Basic, Standard, Premium)",
+    "Dual payment processing (Stripe and PayPal)",
+    "TMDB content catalog integration",
+    "Domain-driven design architecture",
+    "Comprehensive security with rate limiting and validation",
+    "MongoDB-based order and customer management",
+    "Responsive Next.js frontend with modern UI components"
+  ],
+  "publicApiSurface": [
+    "POST /api/orders - Create new subscription order",
+    "POST /api/stripe - Create Stripe payment intent",
+    "POST /api/paypal/create-order - Create PayPal order",
+    "POST /api/paypal/capture-order - Capture PayPal payment",
+    "GET /api/tmdb - Fetch trending content",
+    "CreateOrderUseCase.execute() - Order creation use case",
+    "Plan entity with createPlan() factory",
+    "Order entity with createOrder() factory",
+    "Customer entity with createCustomer() factory",
+    "Email and Phone value objects"
+  ]
+}
